@@ -1,1 +1,20 @@
-//! Protocol event definitions.
+use anchor_lang::prelude::*;
+
+use crate::math::IndexSet;
+
+#[event]
+pub struct ConditionPrepared {
+    pub condition_id: [u8; 32],
+    pub resolver: Pubkey,
+    pub question_id: [u8; 32],
+    pub outcome_count: u16,
+}
+
+#[event]
+pub struct CollectionRegistered {
+    pub collection_id: [u8; 32],
+    pub parent_collection_id: [u8; 32],
+    pub condition_id: [u8; 32],
+    pub index_set: IndexSet,
+    pub hash_attempts: u32,
+}

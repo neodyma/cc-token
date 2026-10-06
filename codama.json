@@ -1,0 +1,17 @@
+{
+  "idl": "target/idl/cc_token.json",
+  "scripts": {
+    "js": {
+      "from": "@codama/renderers-js",
+      "args": [
+        "packages/sdk",
+        {
+          "erasableSyntax": true,
+          "importExtension": "ts",
+          "kitImportStrategy": "rootOnly",
+          "syncPackageJson": false
+        }
+      ]
+    }
+  }
+}

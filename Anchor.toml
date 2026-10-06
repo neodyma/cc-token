@@ -17,4 +17,4 @@ cluster = "localnet"
 wallet = ".local/wallet.json"
 
 [scripts]
-test = "cargo test --workspace --locked"
+test = "pnpm test"

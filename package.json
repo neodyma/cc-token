@@ -8,12 +8,20 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check:sbpf": "node scripts/check-sbpf.mjs",
-    "test": "cargo test --workspace --locked",
-    "check": "cargo check --workspace --all-targets --locked",
+    "generate:client": "codama run js",
+    "test": "pnpm build && pnpm test:rust && pnpm test:sdk && pnpm test:litesvm && pnpm test:integration",
+    "test:rust": "cargo test --workspace --locked",
+    "test:sdk": "pnpm --filter @cc-token/sdk test",
+    "test:litesvm": "node scripts/test-litesvm.mjs",
+    "test:integration": "node scripts/test-integration.mjs",
+    "check": "cargo check --workspace --all-targets --locked && pnpm generate:client && pnpm --filter @cc-token/sdk typecheck",
     "format": "cargo fmt --all && prettier --write . --ignore-path .gitignore --ignore-path .prettierignore",
     "format:check": "cargo fmt --all --check && prettier --check . --ignore-path .gitignore --ignore-path .prettierignore"
   },
   "devDependencies": {
+    "@codama/nodes-from-anchor": "1.5.6",
+    "@codama/renderers-js": "2.5.0",
+    "codama": "1.11.0",
     "prettier": "3.9.9"
   }
 }

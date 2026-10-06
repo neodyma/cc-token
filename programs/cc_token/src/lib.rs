@@ -1,7 +1,9 @@
 pub mod constants;
 pub mod errors;
 pub mod events;
+pub mod identity;
 pub mod instructions;
+pub mod math;
 pub mod prelude;
 pub mod state;
 
@@ -19,12 +21,18 @@ pub mod cc_token {
         setup::register_collateral(ctx)
     }
 
-    pub fn prepare_condition(ctx: Context<PrepareCondition>) -> CcTokenResult {
-        setup::prepare_condition(ctx)
+    pub fn prepare_condition(
+        ctx: Context<PrepareCondition>,
+        args: PrepareConditionArgs,
+    ) -> CcTokenResult {
+        setup::prepare_condition(ctx, args)
     }
 
-    pub fn register_collection(ctx: Context<RegisterCollection>) -> CcTokenResult {
-        definitions::register_collection(ctx)
+    pub fn register_collection(
+        ctx: Context<RegisterCollection>,
+        args: RegisterCollectionArgs,
+    ) -> CcTokenResult {
+        definitions::register_collection(ctx, args)
     }
 
     pub fn register_position(ctx: Context<RegisterPosition>) -> CcTokenResult {

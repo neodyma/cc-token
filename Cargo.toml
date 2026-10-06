@@ -2,6 +2,7 @@
 members = [
     "programs/*"
 ]
+exclude = ["tests/litesvm"]
 resolver = "2"
 
 [workspace.package]

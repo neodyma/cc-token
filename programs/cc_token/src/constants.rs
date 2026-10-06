@@ -1,5 +1,8 @@
 pub const CONDITION_SEED: &[u8] = b"condition";
 pub const COLLECTION_SEED: &[u8] = b"collection";
+pub const CONDITION_ID_DOMAIN: &[u8] = b"SVM_CTF_V1";
+pub const ROOT_COLLECTION_ID: [u8; 32] = [0; 32];
+pub const STATE_VERSION: u8 = 1;
 pub const POSITION_SEED: &[u8] = b"position";
 pub const COLLATERAL_SEED: &[u8] = b"collateral";
 pub const VAULT_SEED: &[u8] = b"vault";
