@@ -6,7 +6,8 @@
     "node": "24.x"
   },
   "scripts": {
-    "build": "anchor build",
+    "build": "node scripts/build.mjs",
+    "check:sbpf": "node scripts/check-sbpf.mjs",
     "test": "cargo test --workspace --locked",
     "check": "cargo check --workspace --all-targets --locked",
     "format": "cargo fmt --all && prettier --write . --ignore-path .gitignore --ignore-path .prettierignore",

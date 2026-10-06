@@ -8,6 +8,9 @@ resolver = "2"
 edition = "2021"
 rust-version = "1.89.0"
 
+[workspace.metadata.cli]
+solana = "4.3.0"
+
 [profile.release]
 overflow-checks = true
 lto = "fat"
