@@ -1,0 +1,4 @@
+# Ignore generated files and format Rust with rustfmt.
+Cargo.lock
+pnpm-lock.yaml
+**/*.rs

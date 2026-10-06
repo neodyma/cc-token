@@ -1,0 +1,42 @@
+# Rust / Anchor outputs and local runtime state
+target/
+.anchor/
+test-ledger/
+.surfpool/
+*.rs.bk
+
+# JavaScript dependencies, generated clients, and frontend outputs
+node_modules/
+.pnpm-store/
+.next/
+.turbo/
+.vercel/
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+/packages/*/src/generated/
+
+# Local wallets, credentials, and private working documents
+.local/
+.env
+.env.*
+!.env.example
+*-keypair.json
+*.keypair.json
+keypair.json
+wallet.json
+wallets/
+*.pem
+*.key
+/cc-token-local/
+
+# Logs / editor state
+*.log
+.DS_Store
+.idea/
+*.swp
+*.swo
+
+# Cargo.lock and pnpm-lock.yaml are intentionally versioned.
