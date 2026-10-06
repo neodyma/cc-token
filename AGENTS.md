@@ -10,3 +10,12 @@
 - Update the README status when implementation changes. Report what was actually checked; an empty-program build does not validate the future protocol.
 - Add Rust integration tests under `programs/cc_token/tests/` when there is behavior to test
 - Add public technical notes under `docs/` as needed
+
+## Project skills
+
+- Solana/Anchor guidance: `.agents/skills/solana-dev/SKILL.md`. Rust guidance: `.agents/skills/rust-best-practices/SKILL.md`. Read only the references relevant to the current task.
+- These are vendored upstream references. Repository instructions, explicit user directions, pinned versions and verified runtime behavior take precedence over their generic defaults. Do not downgrade Anchor or Solana to match an older compatibility table.
+- Keep SBF builds on SBPF v3: use `pnpm build`, which checks the emitted ELF version. Host Rust tests do not establish SBF runtime compatibility.
+- Installing a skill does not authorize changing global configuration or installing its suggested MCP servers, frameworks, dependencies or deployment tooling. Use existing tools and official documentation unless the task calls for additional installation.
+- Apply Rust advice within SBF's memory/compute constraints and the pinned compiler's supported language features. Use Anchor errors for program failures; do not add host-oriented error or allocation libraries just to follow a generic example.
+- Preserve vendored files and licenses. Provenance and hashes are in `.agents/skills.lock.json`; update them deliberately as described in `docs/agent-skills.md`.

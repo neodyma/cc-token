@@ -2,3 +2,6 @@
 Cargo.lock
 pnpm-lock.yaml
 **/*.rs
+
+# Preserve vendored upstream skills byte-for-byte.
+.agents/skills/
