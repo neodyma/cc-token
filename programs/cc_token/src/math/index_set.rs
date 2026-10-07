@@ -15,6 +15,28 @@ pub struct IndexSet {
 impl IndexSet {
     pub const ZERO: Self = Self { words: [0; 4] };
 
+    pub fn universe(outcome_count: u16) -> CcTokenResult<Self> {
+        require!(
+            (MIN_OUTCOME_COUNT..=MAX_OUTCOME_COUNT).contains(&outcome_count),
+            CcTokenError::InvalidOutcomeCount
+        );
+
+        if outcome_count == MAX_OUTCOME_COUNT {
+            return Ok(Self {
+                words: [u64::MAX; 4],
+            });
+        }
+
+        let mut words = [0; 4];
+        let full_words = usize::from(outcome_count / 64);
+        words[..full_words].fill(u64::MAX);
+        let remaining_bits = outcome_count % 64;
+        if remaining_bits != 0 {
+            words[full_words] = (1u64 << remaining_bits) - 1;
+        }
+        Ok(Self { words })
+    }
+
     pub fn from_be_bytes(bytes: [u8; 32]) -> Self {
         let mut words = [0; 4];
         for (index, word) in words.iter_mut().enumerate() {
@@ -37,14 +59,27 @@ impl IndexSet {
         self == Self::ZERO
     }
 
-    pub fn validate(self, outcome_count: u16) -> CcTokenResult {
-        require!(
-            (MIN_OUTCOME_COUNT..=MAX_OUTCOME_COUNT).contains(&outcome_count),
-            CcTokenError::InvalidOutcomeCount
-        );
-        require!(!self.is_empty(), CcTokenError::EmptyIndexSet);
+    pub fn contains(self, outcome: u16) -> bool {
+        outcome < MAX_OUTCOME_COUNT
+            && self.words[usize::from(outcome / 64)] & (1u64 << (outcome % 64)) != 0
+    }
 
-        let full_index_set = Self::full(outcome_count);
+    pub fn union(self, other: Self) -> Self {
+        Self {
+            words: core::array::from_fn(|index| self.words[index] | other.words[index]),
+        }
+    }
+
+    pub fn overlaps(self, other: Self) -> bool {
+        self.words
+            .iter()
+            .zip(other.words)
+            .any(|(left, right)| left & right != 0)
+    }
+
+    pub fn validate(self, outcome_count: u16) -> CcTokenResult {
+        let full_index_set = Self::universe(outcome_count)?;
+        require!(!self.is_empty(), CcTokenError::EmptyIndexSet);
         require!(
             self.words
                 .iter()
@@ -55,23 +90,6 @@ impl IndexSet {
         require!(self != full_index_set, CcTokenError::FullIndexSet);
 
         Ok(())
-    }
-
-    fn full(outcome_count: u16) -> Self {
-        if outcome_count == MAX_OUTCOME_COUNT {
-            return Self {
-                words: [u64::MAX; 4],
-            };
-        }
-
-        let mut words = [0; 4];
-        let full_words = usize::from(outcome_count / 64);
-        words[..full_words].fill(u64::MAX);
-        let remaining_bits = outcome_count % 64;
-        if remaining_bits != 0 {
-            words[full_words] = (1u64 << remaining_bits) - 1;
-        }
-        Self { words }
     }
 }
 
@@ -108,15 +126,30 @@ mod tests {
     fn validates_boundaries_through_outcome_255() {
         for (outcome_count, bits) in [
             (2, vec![0]),
+            (3, vec![2]),
             (8, vec![7]),
             (16, vec![15]),
             (65, vec![63, 64]),
             (129, vec![127, 128]),
+            (193, vec![191, 192]),
             (255, vec![254]),
             (256, vec![255]),
         ] {
             assert!(index_set(&bits).validate(outcome_count).is_ok());
         }
+    }
+
+    #[test]
+    fn combines_and_queries_all_word_boundaries() {
+        let left = index_set(&[0, 63, 127, 191, 255]);
+        let right = index_set(&[64, 128, 192]);
+        let union = left.union(right);
+
+        for outcome in [0, 63, 64, 127, 128, 191, 192, 255] {
+            assert!(union.contains(outcome));
+        }
+        assert!(!left.overlaps(right));
+        assert!(left.overlaps(index_set(&[63])));
     }
 
     #[test]

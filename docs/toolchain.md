@@ -46,4 +46,4 @@ The build runs the pinned Anchor CLI with `--arch v3 --tools-version v1.57`, the
 
 SBPF v3 is the program binary format. Transaction v1 is the client/network message format. This toolchain supports preparing for both, but the SDK still needs a v1-capable builder and wallet, correct resource configuration, and integration tests. The core program's financial state machine does not need a different algebra for transaction v1. See [transaction v1 support](https://solana.com/upgrades/larger-transaction-sizes).
 
-The current Rust test command is a host test run; the program remains empty. Later runtime tests must load the compiled SBPF v3 artifact and exercise actual instructions, CPIs and transaction serialization. Build outputs, tool caches and disposable wallets stay ignored.
+The root test command builds and verifies the SBPF v3 artifact, runs host Rust and TypeScript tests, executes the compiled program through LiteSVM, and submits version 0 plus optional version 1 transactions to a pinned local validator. Build outputs, generated clients, validator ledgers and disposable wallets stay ignored.

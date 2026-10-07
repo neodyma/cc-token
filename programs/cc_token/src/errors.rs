@@ -16,6 +16,18 @@ pub enum CcTokenError {
     IndexSetOutOfRange,
     #[msg("Index set must be a proper subset of the condition outcomes")]
     FullIndexSet,
+    #[msg("A partition must contain at least two subsets")]
+    PartitionTooSmall,
+    #[msg("Partition subsets must not overlap")]
+    PartitionOverlap,
+    #[msg("The collateral root does not have a position ID")]
+    RootPosition,
+    #[msg("Payout denominator must be greater than zero")]
+    ZeroPayoutDenominator,
+    #[msg("Payout numerator must not exceed its denominator")]
+    InvalidPayoutFraction,
+    #[msg("Arithmetic overflow")]
+    ArithmeticOverflow,
     #[msg("Collection ID does not match its construction")]
     InvalidCollectionId,
     #[msg("Root collections must not provide a parent account")]

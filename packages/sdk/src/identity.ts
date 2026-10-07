@@ -12,6 +12,7 @@ import { CC_TOKEN_PROGRAM_ADDRESS } from "./generated/programs/ccToken.ts";
 const BASE_FIELD_MODULUS =
   21_888_242_871_839_275_222_246_405_745_257_275_088_696_311_157_297_823_662_689_037_894_645_226_208_583n;
 const CONDITION_DOMAIN = new TextEncoder().encode("SVM_CTF_V1");
+const POSITION_DOMAIN = new TextEncoder().encode("SVM_CTF_POSITION_V1");
 const CONDITION_SEED = new TextEncoder().encode("condition");
 const COLLECTION_SEED = new TextEncoder().encode("collection");
 
@@ -55,7 +56,21 @@ export function deriveCollectionId(
   return { collectionId: encodeCollectionId(point), hashAttempts: atomic.hashAttempts };
 }
 
+export function derivePositionId(
+  collateralMint: Address,
+  collectionId: ReadonlyUint8Array,
+): Uint8Array {
+  assertIdentifier(collectionId, "collectionId");
+  if (bytesEqual(collectionId, ROOT_COLLECTION_ID)) {
+    throw new RangeError("the collateral root does not have a position ID");
+  }
+  return keccak_256(
+    concatBytes(POSITION_DOMAIN, getAddressEncoder().encode(collateralMint), collectionId),
+  );
+}
+
 export function encodeIndexSet(indexSet: IndexSetWords): Uint8Array {
+  if (indexSet.length !== 4) throw new RangeError("indexSet must contain four words");
   const bytes = new Uint8Array(32);
   for (let index = 0; index < 4; index += 1) {
     let word = indexSet[index];

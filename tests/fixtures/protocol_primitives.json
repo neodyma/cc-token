@@ -1,0 +1,106 @@
+{
+  "condition": {
+    "resolver": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+    "questionId": "0909090909090909090909090909090909090909090909090909090909090909",
+    "outcomeCount": 8,
+    "conditionId": "0c78673028e10c4a29a2734062f0d3eb7fff32139df5147f3750a20772b32400"
+  },
+  "collection": {
+    "source": "https://github.com/gnosis/conditional-tokens-contracts/blob/master/docs/developer-guide.rst",
+    "conditionId": "67eb23e8932765c1d7a094838c928476df8c50d1d3898f278ef1fb2a62afab63",
+    "indexSetWords": ["3", "0", "0", "0"],
+    "collectionId": "229b067e142fce0aea84afb935095c6ecbea8647b8a013e795cc0ced3210a3d5"
+  },
+  "position": {
+    "collateralMint": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+    "collectionId": "229b067e142fce0aea84afb935095c6ecbea8647b8a013e795cc0ced3210a3d5",
+    "positionId": "11cccb636a289cd0bdab25cadcd2222eb4e140f68723529d470265a1d0f9b447"
+  },
+  "partitions": [
+    {
+      "name": "binary-full",
+      "outcomeCount": 2,
+      "subsets": [
+        ["1", "0", "0", "0"],
+        ["2", "0", "0", "0"]
+      ],
+      "union": ["3", "0", "0", "0"],
+      "isFull": true
+    },
+    {
+      "name": "three-outcome-group-and-complement",
+      "outcomeCount": 3,
+      "subsets": [
+        ["3", "0", "0", "0"],
+        ["4", "0", "0", "0"]
+      ],
+      "union": ["7", "0", "0", "0"],
+      "isFull": true
+    },
+    {
+      "name": "sixteen-outcome-partial",
+      "outcomeCount": 16,
+      "subsets": [
+        ["1", "0", "0", "0"],
+        ["32768", "0", "0", "0"]
+      ],
+      "union": ["32769", "0", "0", "0"],
+      "isFull": false
+    },
+    {
+      "name": "two-hundred-fifty-five-outcome-partial",
+      "outcomeCount": 255,
+      "subsets": [
+        ["1", "0", "0", "0"],
+        ["0", "0", "0", "4611686018427387904"]
+      ],
+      "union": ["1", "0", "0", "4611686018427387904"],
+      "isFull": false
+    },
+    {
+      "name": "two-hundred-fifty-six-outcome-word-boundaries",
+      "outcomeCount": 256,
+      "subsets": [
+        ["9223372036854775809", "9223372036854775808", "9223372036854775808", "0"],
+        ["0", "1", "1", "9223372036854775809"]
+      ],
+      "union": [
+        "9223372036854775809",
+        "9223372036854775809",
+        "9223372036854775809",
+        "9223372036854775809"
+      ],
+      "isFull": false
+    }
+  ],
+  "payouts": [
+    {
+      "name": "zero",
+      "amount": "18446744073709551615",
+      "numerator": "0",
+      "denominator": "4703919738795935661826",
+      "payout": "0"
+    },
+    {
+      "name": "half",
+      "amount": "100",
+      "numerator": "1",
+      "denominator": "2",
+      "payout": "50"
+    },
+    {
+      "name": "full",
+      "amount": "18446744073709551615",
+      "numerator": "4703919738795935661826",
+      "denominator": "4703919738795935661826",
+      "payout": "18446744073709551615"
+    },
+    {
+      "name": "136-bit-product",
+      "amount": "18446744073709551615",
+      "numerator": "4703919738795935661825",
+      "denominator": "4703919738795935661826",
+      "payout": "18446744073709551614"
+    }
+  ]
+}

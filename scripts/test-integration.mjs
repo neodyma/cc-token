@@ -76,7 +76,7 @@ try {
   await waitForValidator();
   const test = spawnSync(
     process.execPath,
-    ["--experimental-strip-types", "--test", "packages/sdk/test/local-validator.test.ts"],
+    ["--experimental-strip-types", "--test", "packages/sdk/test/local-validator.integration.ts"],
     {
       cwd: root,
       env: {

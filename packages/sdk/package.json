@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test test/identity.test.ts"
+    "test": "node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",
