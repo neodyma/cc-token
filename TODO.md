@@ -115,8 +115,8 @@
 - [x] Transaction-version selection
 - [ ] Complete definition retrieval (condition and collection retrieval is implemented)
 - [ ] Balance discovery across representations
-- [ ] Logical subset normalization
-- [ ] Explicit repeated-factor construction
+- [x] Logical subset normalization
+- [x] Explicit repeated-factor construction
 - [ ] Split, merge, transfer, resolution, redemption and wrapper builders
 - [ ] Transaction capacity estimation
 - [ ] Large-operation planning into complete resumable steps
