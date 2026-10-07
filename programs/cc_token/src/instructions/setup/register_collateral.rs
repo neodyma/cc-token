@@ -1,60 +1,97 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token_2022::spl_token_2022::{
+        extension::{BaseStateWithExtensions, StateWithExtensions},
+        state::Mint as MintState,
+    },
+    token_interface::{Mint, TokenAccount, TokenInterface},
+};
 
 use crate::{
-    constants::{COLLATERAL_SEED, VAULT_SEED},
+    constants::{COLLATERAL_POLICY_VERSION, COLLATERAL_SEED, STATE_VERSION, VAULT_SEED},
     events::CollateralRegistered,
-    prelude::*
+    prelude::*,
 };
 
 #[derive(Accounts)]
-pub struct RegisterCollateral <'info>{
+pub struct RegisterCollateral<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-
+    #[account(mint::token_program = token_program)]
     pub mint: InterfaceAccount<'info, Mint>,
-
     #[account(
-        init,
-        payer=payer,
-        space= CollateralConfig::DISCRIMINATOR.len() + CollateralConfig::INIT_SPACE,
-        seeds=[COLLATERAL_SEED, mint.key().as_ref()],
-        bump,
+        init_if_needed,
+        payer = payer,
+        space = CollateralConfig::SPACE,
+        seeds = [COLLATERAL_SEED, mint.key().as_ref()],
+        bump
     )]
     pub config: Account<'info, CollateralConfig>,
-
-    // ?! TA vs ATA trade off
+    /// CHECK: PDA that only signs for the vault; it holds no data.
+    #[account(seeds = [VAULT_SEED, mint.key().as_ref()], bump)]
+    pub vault_authority: UncheckedAccount<'info>,
     #[account(
-        init,
-        payer=payer,
-        seeds=[VAULT_SEED, mint.key().as_ref()],
-        bump,
-        token::mint= mint,
-        token::authority=config,
-        token::token_program= token_program
+        init_if_needed,
+        payer = payer,
+        associated_token::mint = mint,
+        associated_token::authority = vault_authority,
+        associated_token::token_program = token_program
     )]
     pub vault: InterfaceAccount<'info, TokenAccount>,
-
     pub token_program: Interface<'info, TokenInterface>,
-    pub system_program: Program<'info,System>
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
 }
 
 pub fn register_collateral(ctx: Context<RegisterCollateral>) -> CcTokenResult {
+    validate_mint_policy(&ctx.accounts.mint.to_account_info())?;
 
-    // ?! confirm vanilla token, if 2022 -> no extensions that could break 1:1 backing
+    let registered = CollateralConfig {
+        version: STATE_VERSION,
+        policy_version: COLLATERAL_POLICY_VERSION,
+        mint: ctx.accounts.mint.key(),
+        token_program: ctx.accounts.token_program.key(),
+        decimals: ctx.accounts.mint.decimals,
+        vault: ctx.accounts.vault.key(),
+        bump: ctx.bumps.config,
+        vault_authority_bump: ctx.bumps.vault_authority,
+    };
 
-    ctx.accounts.config.set_inner(CollateralConfig { 
-        mint: ctx.accounts.mint.key(), 
-        bump: ctx.bumps.config, 
-        vault_bump: ctx.bumps.vault
-    });
+    let config = &mut ctx.accounts.config;
+    if config.version == 0 {
+        emit!(CollateralRegistered {
+            mint: registered.mint,
+            token_program: registered.token_program,
+            vault: registered.vault,
+            decimals: registered.decimals,
+        });
+        config.set_inner(registered);
+        return Ok(());
+    }
 
-    emit!(CollateralRegistered{ 
-        mint: ctx.accounts.mint.key(), 
-        vault: ctx.accounts.vault.key(), 
-        decimals: ctx.accounts.mint.decimals
-    });
+    require!(
+        config.version == registered.version
+            && config.policy_version == registered.policy_version
+            && config.mint == registered.mint
+            && config.token_program == registered.token_program
+            && config.decimals == registered.decimals
+            && config.vault == registered.vault
+            && config.bump == registered.bump
+            && config.vault_authority_bump == registered.vault_authority_bump,
+        CcTokenError::CollateralMismatch
+    );
 
+    Ok(())
+}
 
+// SPL Token mints carry no extensions; Token-2022 mints are admitted only without any.
+fn validate_mint_policy(mint: &AccountInfo) -> CcTokenResult {
+    let data = mint.try_borrow_data()?;
+    let extensions = StateWithExtensions::<MintState>::unpack(&data)?.get_extension_types()?;
+    require!(
+        extensions.is_empty(),
+        CcTokenError::UnsupportedCollateralExtension
+    );
     Ok(())
 }

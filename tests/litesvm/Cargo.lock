@@ -836,6 +836,7 @@ dependencies = [
  "solana-message",
  "solana-program-runtime",
  "solana-signer",
+ "solana-system-interface 3.2.0",
  "solana-transaction",
 ]
 

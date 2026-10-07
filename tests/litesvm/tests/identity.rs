@@ -4,12 +4,15 @@ use anchor_lang::{
     prelude::{AccountDeserialize, AccountSerialize, Pubkey, System},
     Id, InstructionData, ToAccountMetas,
 };
-use anchor_spl::token_interface::TokenAccount;
+use anchor_spl::{
+    associated_token::{self, get_associated_token_address_with_program_id},
+    token_interface::TokenAccount,
+};
 use cc_token::{
     accounts,
     constants::{
-        COLLATERAL_SEED, COLLECTION_SEED, CONDITION_SEED, ROOT_COLLECTION_ID, STATE_VERSION,
-        VAULT_SEED,
+        COLLATERAL_POLICY_VERSION, COLLATERAL_SEED, COLLECTION_SEED, CONDITION_SEED,
+        ROOT_COLLECTION_ID, STATE_VERSION, VAULT_SEED,
     },
     identity::derive_collection_id,
     instruction,
@@ -21,13 +24,21 @@ use cc_token::{
     ID,
 };
 use litesvm::{types::TransactionMetadata, LiteSVM};
-use litesvm_token::CreateMint;
+use litesvm_token::{
+    spl_token::{
+        extension::{transfer_fee::instruction::initialize_transfer_fee_config, ExtensionType},
+        instruction::initialize_mint2,
+        state::Mint,
+    },
+    CreateMint,
+};
 use solana_account::Account;
 use solana_address::Address;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_message::{v0, v1, VersionedMessage};
 use solana_signer::Signer;
+use solana_system_interface::instruction::create_account;
 use solana_transaction::versioned::VersionedTransaction;
 
 const COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
@@ -86,12 +97,53 @@ impl TestContext {
         self.svm.send_transaction(transaction)
     }
 
-    fn create_mint(&mut self, token_program: Address, decimals: u8) -> Address {
-        CreateMint::new(&mut self.svm, &self.payer)
+    fn create_mint(&mut self, token_program: Address, freeze_authority: Option<Address>) -> Address {
+        let mut builder = CreateMint::new(&mut self.svm, &self.payer)
             .token_program_id(&token_program)
-            .decimals(decimals)
-            .send()
-            .unwrap()
+            .decimals(COLLATERAL_DECIMALS);
+        if let Some(freeze_authority) = freeze_authority.as_ref() {
+            builder = builder.freeze_authority(freeze_authority);
+        }
+        builder.send().unwrap()
+    }
+
+    fn create_transfer_fee_mint(&mut self) -> Address {
+        let mint = Keypair::new();
+        let payer = self.payer.pubkey();
+        let token_program = anchor_spl::token_2022::ID;
+        let size =
+            ExtensionType::try_calculate_account_len::<Mint>(&[ExtensionType::TransferFeeConfig])
+                .unwrap();
+        let instructions = [
+            create_account(
+                &payer,
+                &mint.pubkey(),
+                self.svm.minimum_balance_for_rent_exemption(size),
+                size as u64,
+                &token_program,
+            ),
+            initialize_transfer_fee_config(&token_program, &mint.pubkey(), None, None, 100, u64::MAX)
+                .unwrap(),
+            initialize_mint2(&token_program, &mint.pubkey(), &payer, None, COLLATERAL_DECIMALS)
+                .unwrap(),
+        ];
+        let message = VersionedMessage::V0(
+            v0::Message::try_compile(&payer, &instructions, &[], self.svm.latest_blockhash())
+                .unwrap(),
+        );
+        let transaction = VersionedTransaction::try_new(message, &[&self.payer, &mint]).unwrap();
+        self.svm.send_transaction(transaction).unwrap();
+        mint.pubkey()
+    }
+
+    fn collateral_config(&self, mint: Address) -> CollateralConfig {
+        deserialize_account(
+            &self
+                .svm
+                .get_account(&collateral_config_address(mint))
+                .unwrap()
+                .data,
+        )
     }
 
     fn condition(&self, condition_id: [u8; 32]) -> Condition {
@@ -190,8 +242,16 @@ fn collateral_config_address(mint: Address) -> Address {
     Address::find_program_address(&[COLLATERAL_SEED, mint.as_ref()], &ID).0
 }
 
-fn vault_address(mint: Address) -> Address {
+fn vault_authority_address(mint: Address) -> Address {
     Address::find_program_address(&[VAULT_SEED, mint.as_ref()], &ID).0
+}
+
+fn vault_address(mint: Address, token_program: Address) -> Address {
+    get_associated_token_address_with_program_id(
+        &vault_authority_address(mint),
+        &mint,
+        &token_program,
+    )
 }
 
 fn register_collateral_instruction(
@@ -205,8 +265,10 @@ fn register_collateral_instruction(
             payer,
             mint,
             config: collateral_config_address(mint),
-            vault: vault_address(mint),
+            vault_authority: vault_authority_address(mint),
+            vault: vault_address(mint, token_program),
             token_program,
+            associated_token_program: associated_token::ID,
             system_program: System::id(),
         }
         .to_account_metas(None),
@@ -230,12 +292,17 @@ fn assert_within_transaction_limit(metadata: &TransactionMetadata) {
 }
 
 #[test]
-fn collateral_registration_creates_config_and_vault_once() {
+fn collateral_registration_is_idempotent_for_supported_mints() {
     let mut context = TestContext::new();
     let payer = context.payer.pubkey();
 
-    for token_program in [anchor_spl::token::ID, anchor_spl::token_2022::ID] {
-        let mint = context.create_mint(token_program, COLLATERAL_DECIMALS);
+    for (token_program, freeze_authority) in [
+        (anchor_spl::token::ID, None),
+        (anchor_spl::token::ID, Some(payer)),
+        (anchor_spl::token_2022::ID, None),
+        (anchor_spl::token_2022::ID, Some(payer)),
+    ] {
+        let mint = context.create_mint(token_program, freeze_authority);
         let instruction = register_collateral_instruction(payer, mint, token_program);
         let fresh = context
             .send(instruction.clone(), TransactionVersion::V0)
@@ -244,60 +311,81 @@ fn collateral_registration_creates_config_and_vault_once() {
 
         let (config_address, config_bump) =
             Address::find_program_address(&[COLLATERAL_SEED, mint.as_ref()], &ID);
-        let (vault_address, vault_bump) =
+        let (vault_authority, vault_authority_bump) =
             Address::find_program_address(&[VAULT_SEED, mint.as_ref()], &ID);
-        let config_account = context.svm.get_account(&config_address).unwrap();
-        assert_eq!(config_account.owner, ID);
-        let config: CollateralConfig = deserialize_account(&config_account.data);
+        let vault_address = vault_address(mint, token_program);
+        assert_eq!(context.svm.get_account(&config_address).unwrap().owner, ID);
+        let config = context.collateral_config(mint);
+        assert_eq!(config.version, STATE_VERSION);
+        assert_eq!(config.policy_version, COLLATERAL_POLICY_VERSION);
         assert_eq!(config.mint, mint);
+        assert_eq!(config.token_program, token_program);
+        assert_eq!(config.decimals, COLLATERAL_DECIMALS);
+        assert_eq!(config.vault, vault_address);
         assert_eq!(config.bump, config_bump);
-        assert_eq!(config.vault_bump, vault_bump);
+        assert_eq!(config.vault_authority_bump, vault_authority_bump);
 
         let vault_account = context.svm.get_account(&vault_address).unwrap();
         assert_eq!(vault_account.owner, token_program);
         let vault: TokenAccount = deserialize_account(&vault_account.data);
         assert_eq!(vault.mint, mint);
-        assert_eq!(vault.owner, config_address);
+        assert_eq!(vault.owner, vault_authority);
         assert_eq!(vault.amount, 0);
         assert!(vault.delegate.is_none());
         assert!(vault.close_authority.is_none());
+        assert!(context.svm.get_account(&vault_authority).is_none());
 
-        assert!(context.send(instruction, TransactionVersion::V0).is_err());
-        let unchanged: CollateralConfig =
-            deserialize_account(&context.svm.get_account(&config_address).unwrap().data);
-        assert_eq!(unchanged.mint, mint);
+        let config_before = context.svm.get_account(&config_address).unwrap().data;
+        let reused = context.send(instruction, TransactionVersion::V0).unwrap();
+        assert_within_transaction_limit(&reused);
+        assert_eq!(
+            context.svm.get_account(&config_address).unwrap().data,
+            config_before
+        );
 
         println!(
-            "register_collateral token_program={token_program} cu={}",
-            fresh.compute_units_consumed
+            "register_collateral token_program={token_program} fresh_cu={} reused_cu={}",
+            fresh.compute_units_consumed, reused.compute_units_consumed
         );
     }
 }
 
 #[test]
-fn invalid_collateral_leaves_no_config_or_vault() {
+fn unsupported_collateral_leaves_no_config_or_vault() {
     let mut context = TestContext::new();
     let payer = context.payer.pubkey();
 
-    let mismatched_mint = context.create_mint(anchor_spl::token::ID, COLLATERAL_DECIMALS);
+    let mismatched_mint = context.create_mint(anchor_spl::token::ID, None);
     let not_a_mint = Keypair::new().pubkey();
     context.svm.airdrop(&not_a_mint, 10_000_000).unwrap();
+    let transfer_fee_mint = context.create_transfer_fee_mint();
 
-    for (mint, token_program) in [
-        (mismatched_mint, anchor_spl::token_2022::ID),
-        (not_a_mint, anchor_spl::token::ID),
+    for (mint, token_program, expected_log) in [
+        (mismatched_mint, anchor_spl::token_2022::ID, None),
+        (not_a_mint, anchor_spl::token::ID, None),
+        (
+            transfer_fee_mint,
+            anchor_spl::token_2022::ID,
+            Some("UnsupportedCollateralExtension"),
+        ),
     ] {
-        assert!(context
+        let error = context
             .send(
                 register_collateral_instruction(payer, mint, token_program),
                 TransactionVersion::V0,
             )
-            .is_err());
+            .unwrap_err();
+        if let Some(expected_log) = expected_log {
+            assert!(error.meta.logs.iter().any(|log| log.contains(expected_log)));
+        }
         assert!(context
             .svm
             .get_account(&collateral_config_address(mint))
             .is_none());
-        assert!(context.svm.get_account(&vault_address(mint)).is_none());
+        assert!(context
+            .svm
+            .get_account(&vault_address(mint, token_program))
+            .is_none());
     }
 }
 
