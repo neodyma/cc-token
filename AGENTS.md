@@ -1,6 +1,7 @@
 # cc-token development
 
-- Read `README.md` for project purpose and layout, and `docs/toolchain.md` for current toolchain pins and build verification.
+- Read [README.md](README.md) for project purpose and layout, [TODO.md](TODO.md) for implementation status and sequencing, and [docs/toolchain.md](docs/toolchain.md) for current toolchain pins and build verification.
+- Keep [TODO.md](TODO.md) current whenever implementation work completes, changes scope, or changes the order of remaining stages.
 - Keep the Anchor workspace at the repository root; program source is in `programs/cc_token/`.
 - Future frontend code belongs in `apps/web/`; shared TypeScript client code belongs in `packages/sdk/`. Do not choose or install a frontend framework without a task that calls for it.
 - Private proposals and review notes belong in the sibling `../cc-token-local/`, never this repository. Public implementation notes may go in `docs/`.
