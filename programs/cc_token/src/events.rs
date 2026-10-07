@@ -18,3 +18,11 @@ pub struct CollectionRegistered {
     pub index_set: IndexSet,
     pub hash_attempts: u32,
 }
+
+#[event]
+pub struct CollateralRegistered {
+    pub mint: Pubkey,
+    pub vault: Pubkey,
+    pub decimals: u8,
+    // add info about mint?!
+}
