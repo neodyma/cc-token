@@ -15,6 +15,7 @@ const CONDITION_DOMAIN = new TextEncoder().encode("SVM_CTF_V1");
 const POSITION_DOMAIN = new TextEncoder().encode("SVM_CTF_POSITION_V1");
 const CONDITION_SEED = new TextEncoder().encode("condition");
 const COLLECTION_SEED = new TextEncoder().encode("collection");
+const PAYOUT_REPORT_SEED = new TextEncoder().encode("payout_report");
 
 export const ROOT_COLLECTION_ID = new Uint8Array(32);
 
@@ -102,6 +103,16 @@ export function getCollectionAddress(
   return getProgramDerivedAddress({
     programAddress: CC_TOKEN_PROGRAM_ADDRESS,
     seeds: [COLLECTION_SEED, collectionId],
+  });
+}
+
+export function getPayoutReportAddress(
+  conditionId: ReadonlyUint8Array,
+): Promise<ProgramDerivedAddress> {
+  assertIdentifier(conditionId, "conditionId");
+  return getProgramDerivedAddress({
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    seeds: [PAYOUT_REPORT_SEED, conditionId],
   });
 }
 

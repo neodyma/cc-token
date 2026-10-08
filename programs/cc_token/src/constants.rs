@@ -1,4 +1,5 @@
 pub const CONDITION_SEED: &[u8] = b"condition";
+pub const PAYOUT_REPORT_SEED: &[u8] = b"payout_report";
 pub const COLLECTION_SEED: &[u8] = b"collection";
 pub const CONDITION_ID_DOMAIN: &[u8] = b"SVM_CTF_V1";
 pub const POSITION_ID_DOMAIN: &[u8] = b"SVM_CTF_POSITION_V1";

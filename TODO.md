@@ -64,16 +64,16 @@
 
 - [x] Exact payout calculation primitive
 - [x] Maximum-width and 136-bit arithmetic tests
-- [ ] Resolver-authorized payout reporting
-- [ ] Immutable final resolution
+- [x] Resolver-authorized payout reporting
+- [x] Immutable final resolution
 - [ ] One-factor redemption
 - [ ] Redemption to a residual position
 - [ ] Redemption to collateral
 - [ ] Repeated-factor redemption
-- [ ] Fractional, zero-paying and one-hot resolution tests
+- [x] Fractional, zero-paying and one-hot resolution tests
 - [ ] Runtime proof of the one-unit-per-step rounding bound
-- [ ] Full 256-entry report through transaction v1
-- [ ] Transaction v0-compatible fallback flow where required
+- [x] Full 256-entry report through transaction v1
+- [x] Transaction v0-compatible fallback flow where required
 
 ## 6. Canonical Token-2022 wrappers
 
@@ -113,7 +113,7 @@
 - [x] Position derivation
 - [x] Partition and payout helpers
 - [x] Transaction-version selection
-- [ ] Complete definition retrieval (condition and collection retrieval is implemented)
+- [ ] Complete definition retrieval (condition and collection retrieval and verification is implemented)
 - [ ] Balance discovery across representations
 - [x] Logical subset normalization
 - [x] Explicit repeated-factor construction

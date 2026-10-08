@@ -71,8 +71,27 @@ pub mod cc_token {
         positions::batch_transfer_positions(ctx)
     }
 
-    pub fn report_payouts(ctx: Context<ReportPayouts>) -> CcTokenResult {
-        settlement::report_payouts(ctx)
+    pub fn report_payouts(ctx: Context<ReportPayouts>, args: ReportPayoutsArgs) -> CcTokenResult {
+        settlement::report_payouts(ctx, args)
+    }
+
+    pub fn initialize_payout_report(ctx: Context<InitializePayoutReport>) -> CcTokenResult {
+        settlement::initialize_payout_report(ctx)
+    }
+
+    pub fn append_payout_report(
+        ctx: Context<AppendPayoutReport>,
+        args: AppendPayoutReportArgs,
+    ) -> CcTokenResult {
+        settlement::append_payout_report(ctx, args)
+    }
+
+    pub fn finalize_payout_report(ctx: Context<FinalizePayoutReport>) -> CcTokenResult {
+        settlement::finalize_payout_report(ctx)
+    }
+
+    pub fn cancel_payout_report(ctx: Context<CancelPayoutReport>) -> CcTokenResult {
+        settlement::cancel_payout_report(ctx)
     }
 
     pub fn redeem_position(ctx: Context<RedeemPosition>) -> CcTokenResult {
