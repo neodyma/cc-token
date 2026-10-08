@@ -52,6 +52,7 @@ import {
   getFinalizePayoutReportInstruction,
   getInitializePositionBalanceInstruction,
   getMergeRootCollateralInstruction,
+  getMergeNativePositionsInstruction,
   getInitializePayoutReportInstruction,
   getPayoutReportAddress,
   getPrepareConditionInstruction,
@@ -62,6 +63,8 @@ import {
   getReportPayoutsInstruction,
   getVaultAuthorityAddress,
   getSplitRootCollateralInstruction,
+  getSplitNativePositionInstruction,
+  getNativePositionSetupInstructions,
   planPayoutReport,
   ROOT_COLLECTION_ID,
   selectTransactionVersion,
@@ -300,6 +303,67 @@ test("generated client submits identity and resolution instructions through v0 a
     if (!balance.exists) throw new Error("expected a root child balance");
     assert.equal(balance.account.data.amount, 300n);
   }
+
+  const refinementPartition = [
+    [0x03n, 0n, 0n, 0n],
+    [0x0cn, 0n, 0n, 0n],
+  ] as const;
+  const refinementSetup = await getNativePositionSetupInstructions({
+    payer,
+    owner: payer.address,
+    collateralMint: mint.address,
+    parentCollectionId: ROOT_COLLECTION_ID,
+    conditionId,
+    outcomeCount: 8,
+    partition: refinementPartition,
+  });
+  for (const instruction of refinementSetup) {
+    await sendInstruction(payer, instruction, v0Only);
+  }
+  const refinementInput = {
+    owner: payer,
+    collateralMint: mint.address,
+    parentCollectionId: ROOT_COLLECTION_ID,
+    conditionId,
+    outcomeCount: 8,
+    partition: refinementPartition,
+    amount: 100n,
+  } as const;
+  await sendInstruction(payer, await getSplitNativePositionInstruction(refinementInput), v0Only);
+  const groupedCollectionId = deriveCollectionId(
+    ROOT_COLLECTION_ID,
+    conditionId,
+    rootPartition[0],
+  ).collectionId;
+  const groupedPositionId = derivePositionId(mint.address, groupedCollectionId);
+  const groupedBalance = await fetchVerifiedPositionBalance(rpc, payer.address, groupedPositionId);
+  assert.equal(groupedBalance.exists, true);
+  if (!groupedBalance.exists) throw new Error("expected a grouped source balance");
+  assert.equal(groupedBalance.account.data.amount, 200n);
+  for (const indexSet of refinementPartition) {
+    const refinedCollectionId = deriveCollectionId(
+      ROOT_COLLECTION_ID,
+      conditionId,
+      indexSet,
+    ).collectionId;
+    const refinedPositionId = derivePositionId(mint.address, refinedCollectionId);
+    const balance = await fetchVerifiedPositionBalance(rpc, payer.address, refinedPositionId);
+    assert.equal(balance.exists, true);
+    if (!balance.exists) throw new Error("expected a refined position balance");
+    assert.equal(balance.account.data.amount, 100n);
+  }
+  await sendInstruction(payer, await getMergeNativePositionsInstruction(refinementInput), v0Only);
+  const restoredGroupedBalance = await fetchVerifiedPositionBalance(
+    rpc,
+    payer.address,
+    groupedPositionId,
+  );
+  assert.equal(restoredGroupedBalance.exists, true);
+  if (!restoredGroupedBalance.exists) throw new Error("expected a restored grouped balance");
+  assert.equal(restoredGroupedBalance.account.data.amount, 300n);
+  assert.equal((await fetchToken(rpc, ownerTokenAccount)).data.amount, 700n);
+  assert.equal((await fetchToken(rpc, config.data.vault)).data.amount, 300n);
+
   await sendInstruction(payer, await getMergeRootCollateralInstruction(rootInput), v0Only);
   assert.equal((await fetchToken(rpc, ownerTokenAccount)).data.amount, 1_000n);
   assert.equal((await fetchToken(rpc, config.data.vault)).data.amount, 0n);

@@ -18,7 +18,7 @@ use cc_token::{
     instruction,
     instructions::{
         definitions::{RegisterCollectionArgs, RegisterPositionArgs},
-        positions::RootCollateralArgs,
+        positions::{NativePositionArgs, RootCollateralArgs},
         settlement::ReportPayoutsArgs,
         setup::PrepareConditionArgs,
     },
@@ -130,14 +130,18 @@ impl TestContext {
         wincode::serialize(&transaction).unwrap().len()
     }
 
-    fn transaction_size_with_lookup(&self, instruction: Instruction) -> usize {
+    fn transaction_size_with_lookup(
+        &self,
+        instruction: Instruction,
+        fixed_account_count: usize,
+    ) -> usize {
         let payer = self.payer.pubkey();
         let lookup_table = AddressLookupTableAccount {
             key: Address::new_unique(),
             addresses: instruction
                 .accounts
                 .iter()
-                .skip(8)
+                .skip(fixed_account_count)
                 .map(|account| account.pubkey)
                 .collect(),
         };
@@ -511,6 +515,91 @@ fn merge_to_collateral_instruction(
     }
 }
 
+fn native_position_accounts(
+    owner: Address,
+    mint: Address,
+    parent_collection_id: [u8; 32],
+    condition_id: [u8; 32],
+    partition: &[IndexSet],
+) -> Vec<AccountMeta> {
+    partition
+        .iter()
+        .flat_map(|index_set| {
+            let collection_id =
+                derive_collection_id(parent_collection_id, condition_id, *index_set)
+                    .unwrap()
+                    .collection_id;
+            let position_id = derive_position_id(&mint, collection_id).unwrap();
+            [
+                AccountMeta::new_readonly(position_address(position_id), false),
+                AccountMeta::new(balance_address(owner, position_id), false),
+            ]
+        })
+        .collect()
+}
+
+fn split_position_instruction(
+    owner: Address,
+    mint: Address,
+    source_collection_id: [u8; 32],
+    args: NativePositionArgs,
+) -> Instruction {
+    let source_position_id = derive_position_id(&mint, source_collection_id).unwrap();
+    let parent_collection = (args.parent_collection_id != ROOT_COLLECTION_ID)
+        .then(|| collection_address(args.parent_collection_id));
+    let mut account_metas = accounts::SplitPosition {
+        owner,
+        condition: condition_address(args.condition_id),
+        source_position: position_address(source_position_id),
+        source_balance: balance_address(owner, source_position_id),
+        parent_collection,
+    }
+    .to_account_metas(None);
+    account_metas.extend(native_position_accounts(
+        owner,
+        mint,
+        args.parent_collection_id,
+        args.condition_id,
+        &args.partition,
+    ));
+    Instruction {
+        program_id: ID,
+        accounts: account_metas,
+        data: instruction::SplitPosition { args }.data(),
+    }
+}
+
+fn merge_positions_instruction(
+    owner: Address,
+    mint: Address,
+    destination_collection_id: [u8; 32],
+    args: NativePositionArgs,
+) -> Instruction {
+    let destination_position_id = derive_position_id(&mint, destination_collection_id).unwrap();
+    let parent_collection = (args.parent_collection_id != ROOT_COLLECTION_ID)
+        .then(|| collection_address(args.parent_collection_id));
+    let mut account_metas = accounts::MergePositions {
+        owner,
+        condition: condition_address(args.condition_id),
+        destination_position: position_address(destination_position_id),
+        destination_balance: balance_address(owner, destination_position_id),
+        parent_collection,
+    }
+    .to_account_metas(None);
+    account_metas.extend(native_position_accounts(
+        owner,
+        mint,
+        args.parent_collection_id,
+        args.condition_id,
+        &args.partition,
+    ));
+    Instruction {
+        program_id: ID,
+        accounts: account_metas,
+        data: instruction::MergePositions { args }.data(),
+    }
+}
+
 fn singleton_partition(outcome_count: u16) -> Vec<IndexSet> {
     (0..outcome_count)
         .map(|outcome| {
@@ -573,6 +662,54 @@ fn prepare_root_positions(
         position_ids.push(position_id);
     }
     (condition, partition, position_ids)
+}
+
+fn prepare_position(
+    context: &mut TestContext,
+    mint: Address,
+    parent_collection_id: [u8; 32],
+    condition_id: [u8; 32],
+    index_set: IndexSet,
+) -> ([u8; 32], [u8; 32]) {
+    let payer = context.payer.pubkey();
+    let collection = register_args(parent_collection_id, condition_id, index_set);
+    let parent_collection = (parent_collection_id != ROOT_COLLECTION_ID)
+        .then(|| collection_address(parent_collection_id));
+    context
+        .send(
+            register_collection_instruction(payer, collection.clone(), parent_collection),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let position_id = derive_position_id(&mint, collection.collection_id).unwrap();
+    context
+        .send(
+            register_position_instruction(
+                payer,
+                RegisterPositionArgs {
+                    position_id,
+                    collateral_mint: mint,
+                    collection_id: collection.collection_id,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    context
+        .send(
+            initialize_balance_instruction(payer, payer, position_id),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    (collection.collection_id, position_id)
+}
+
+fn index_set(outcomes: &[u16]) -> IndexSet {
+    let mut words = [0; 4];
+    for outcome in outcomes {
+        words[usize::from(outcome / 64)] |= 1 << (outcome % 64);
+    }
+    IndexSet { words }
 }
 
 fn register_args(
@@ -1053,7 +1190,7 @@ fn root_split_capacity_is_measured_for_two_eight_and_sixteen_outputs() {
         let instruction_data_bytes = instruction.data.len();
         let transaction_bytes = context.transaction_size(instruction.clone(), version);
         let lookup_transaction_bytes =
-            context.transaction_size_with_lookup(instruction.clone());
+            context.transaction_size_with_lookup(instruction.clone(), 8);
         assert!(lookup_transaction_bytes <= 1_232);
         let metadata = context.send(instruction, version).unwrap();
         assert_within_transaction_limit(&metadata);
@@ -1065,6 +1202,651 @@ fn root_split_capacity_is_measured_for_two_eight_and_sixteen_outputs() {
             metadata.compute_units_consumed
         );
     }
+}
+
+#[test]
+fn native_refinement_and_merge_cover_grouped_nested_and_repeated_factors() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let token_program = anchor_spl::token::ID;
+    let (mint, owner_account) = context.create_funded_collateral(token_program, 1_000);
+    context
+        .send(
+            register_collateral_instruction(payer, mint, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let tournament = condition_args(payer, [41; 32], 8);
+    context
+        .send(
+            prepare_condition_instruction(payer, tournament.clone()),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let top_three = index_set(&[0, 1, 2]);
+    let remaining_teams = index_set(&[3, 4, 5, 6, 7]);
+    let (top_three_collection, top_three_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        tournament.condition_id,
+        top_three,
+    );
+    prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        tournament.condition_id,
+        remaining_teams,
+    );
+    context
+        .send(
+            split_from_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RootCollateralArgs {
+                    condition_id: tournament.condition_id,
+                    partition: vec![top_three, remaining_teams],
+                    amount: 100,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let first_two = index_set(&[0, 1]);
+    let third = index_set(&[2]);
+    let (_, first_two_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        tournament.condition_id,
+        first_two,
+    );
+    let (_, third_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        tournament.condition_id,
+        third,
+    );
+    let partial_args = NativePositionArgs {
+        parent_collection_id: ROOT_COLLECTION_ID,
+        condition_id: tournament.condition_id,
+        partition: vec![first_two, third],
+        amount: 60,
+    };
+    context
+        .send(
+            split_position_instruction(
+                payer,
+                mint,
+                top_three_collection,
+                partial_args.clone(),
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, top_three_position).amount, 40);
+    assert_eq!(context.balance(payer, first_two_position).amount, 60);
+    assert_eq!(context.balance(payer, third_position).amount, 60);
+
+    context
+        .send(
+            merge_positions_instruction(
+                payer,
+                mint,
+                top_three_collection,
+                NativePositionArgs {
+                    amount: 25,
+                    ..partial_args
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, top_three_position).amount, 65);
+    assert_eq!(context.balance(payer, first_two_position).amount, 35);
+    assert_eq!(context.balance(payer, third_position).amount, 35);
+
+    let penalties = condition_args(payer, [42; 32], 2);
+    context
+        .send(
+            prepare_condition_instruction(payer, penalties.clone()),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let penalty = index_set(&[0]);
+    let no_penalty = index_set(&[1]);
+    let (_, penalty_position) = prepare_position(
+        &mut context,
+        mint,
+        top_three_collection,
+        penalties.condition_id,
+        penalty,
+    );
+    let (_, no_penalty_position) = prepare_position(
+        &mut context,
+        mint,
+        top_three_collection,
+        penalties.condition_id,
+        no_penalty,
+    );
+    let nested_args = NativePositionArgs {
+        parent_collection_id: top_three_collection,
+        condition_id: penalties.condition_id,
+        partition: vec![penalty, no_penalty],
+        amount: 40,
+    };
+    context
+        .send(
+            split_position_instruction(
+                payer,
+                mint,
+                top_three_collection,
+                nested_args.clone(),
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, top_three_position).amount, 25);
+    assert_eq!(context.balance(payer, penalty_position).amount, 40);
+    assert_eq!(context.balance(payer, no_penalty_position).amount, 40);
+
+    context
+        .send(
+            report_payouts_instruction(payer, penalties.condition_id, vec![1, 0]),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    context
+        .send(
+            merge_positions_instruction(
+                payer,
+                mint,
+                top_three_collection,
+                nested_args,
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, top_three_position).amount, 65);
+    assert_eq!(context.balance(payer, penalty_position).amount, 0);
+    assert_eq!(context.balance(payer, no_penalty_position).amount, 0);
+
+    let repeated_group = index_set(&[0, 1]);
+    let repeated_remainder = index_set(&[2, 3, 4, 5, 6, 7]);
+    let (repeated_group_collection, repeated_group_position) = prepare_position(
+        &mut context,
+        mint,
+        top_three_collection,
+        tournament.condition_id,
+        repeated_group,
+    );
+    let (_, repeated_remainder_position) = prepare_position(
+        &mut context,
+        mint,
+        top_three_collection,
+        tournament.condition_id,
+        repeated_remainder,
+    );
+    let repeated_args = NativePositionArgs {
+        parent_collection_id: top_three_collection,
+        condition_id: tournament.condition_id,
+        partition: vec![repeated_group, repeated_remainder],
+        amount: 1,
+    };
+    context
+        .send(
+            split_position_instruction(
+                payer,
+                mint,
+                top_three_collection,
+                repeated_args.clone(),
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let repeated_first = index_set(&[0]);
+    let repeated_second = index_set(&[1]);
+    let mut repeated_partial_positions = Vec::new();
+    for subset in [repeated_first, repeated_second] {
+        let (_, position_id) = prepare_position(
+            &mut context,
+            mint,
+            top_three_collection,
+            tournament.condition_id,
+            subset,
+        );
+        repeated_partial_positions.push(position_id);
+    }
+    let repeated_partial_args = NativePositionArgs {
+        parent_collection_id: top_three_collection,
+        condition_id: tournament.condition_id,
+        partition: vec![repeated_first, repeated_second],
+        amount: 1,
+    };
+    context
+        .send(
+            split_position_instruction(
+                payer,
+                mint,
+                repeated_group_collection,
+                repeated_partial_args.clone(),
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert!(repeated_partial_positions
+        .iter()
+        .all(|position_id| context.balance(payer, *position_id).amount == 1));
+    context
+        .send(
+            merge_positions_instruction(
+                payer,
+                mint,
+                repeated_group_collection,
+                repeated_partial_args,
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    context
+        .send(
+            merge_positions_instruction(
+                payer,
+                mint,
+                top_three_collection,
+                repeated_args,
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    assert_eq!(context.balance(payer, top_three_position).amount, 65);
+    assert_eq!(context.balance(payer, repeated_group_position).amount, 0);
+    assert_eq!(
+        context.balance(payer, repeated_remainder_position).amount,
+        0
+    );
+    assert_eq!(context.token_amount(owner_account), 900);
+    assert_eq!(context.token_amount(vault_address(mint, token_program)), 100);
+}
+
+#[test]
+fn native_refinement_capacity_is_measured_for_two_eight_and_sixteen_outputs() {
+    for output_count in [2, 8, 16] {
+        let mut context = TestContext::new();
+        let payer = context.payer.pubkey();
+        let token_program = anchor_spl::token::ID;
+        let (mint, owner_account) = context.create_funded_collateral(token_program, 10);
+        context
+            .send(
+                register_collateral_instruction(payer, mint, token_program),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+
+        let (base_condition, base_partition, base_positions) =
+            prepare_root_positions(&mut context, mint, 2, payer);
+        context
+            .send(
+                split_from_collateral_instruction(
+                    payer,
+                    owner_account,
+                    mint,
+                    token_program,
+                    RootCollateralArgs {
+                        condition_id: base_condition.condition_id,
+                        partition: base_partition.clone(),
+                        amount: 1,
+                    },
+                ),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+        let parent_collection_id = derive_collection_id(
+            ROOT_COLLECTION_ID,
+            base_condition.condition_id,
+            base_partition[0],
+        )
+        .unwrap()
+        .collection_id;
+
+        let refinement = condition_args(
+            Pubkey::new_from_array([output_count as u8; 32]),
+            [output_count as u8 + 120; 32],
+            output_count,
+        );
+        context
+            .send(
+                prepare_condition_instruction(payer, refinement.clone()),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+        let partition = singleton_partition(output_count);
+        let mut child_positions = Vec::with_capacity(partition.len());
+        for subset in &partition {
+            let (_, position_id) = prepare_position(
+                &mut context,
+                mint,
+                parent_collection_id,
+                refinement.condition_id,
+                *subset,
+            );
+            child_positions.push(position_id);
+        }
+
+        let instruction = split_position_instruction(
+            payer,
+            mint,
+            parent_collection_id,
+            NativePositionArgs {
+                parent_collection_id,
+                condition_id: refinement.condition_id,
+                partition,
+                amount: 1,
+            },
+        );
+        let account_count = instruction.accounts.len();
+        let instruction_data_bytes = instruction.data.len();
+        let transaction_bytes =
+            context.transaction_size(instruction.clone(), TransactionVersion::V0);
+        let lookup_transaction_bytes =
+            context.transaction_size_with_lookup(instruction.clone(), 5);
+        assert!(lookup_transaction_bytes <= 1_232);
+        let version = if output_count == 2 {
+            TransactionVersion::V0
+        } else {
+            TransactionVersion::V1
+        };
+        let metadata = context.send(instruction, version).unwrap();
+        assert_within_transaction_limit(&metadata);
+        assert_eq!(context.balance(payer, base_positions[0]).amount, 0);
+        assert!(child_positions
+            .iter()
+            .all(|position_id| context.balance(payer, *position_id).amount == 1));
+        println!(
+            "split_position outputs={output_count} accounts={account_count} instruction_data_bytes={instruction_data_bytes} transaction_bytes={transaction_bytes} lookup_transaction_bytes={lookup_transaction_bytes} compute_units={}",
+            metadata.compute_units_consumed
+        );
+    }
+}
+
+#[test]
+fn invalid_native_transitions_leave_every_balance_unchanged() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let token_program = anchor_spl::token::ID;
+    let (mint, owner_account) = context.create_funded_collateral(token_program, 20);
+    context
+        .send(
+            register_collateral_instruction(payer, mint, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let condition = condition_args(payer, [63; 32], 3);
+    context
+        .send(
+            prepare_condition_instruction(payer, condition.clone()),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let grouped = index_set(&[0, 1]);
+    let complement = index_set(&[2]);
+    let (grouped_collection, grouped_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        grouped,
+    );
+    prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        complement,
+    );
+    context
+        .send(
+            split_from_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RootCollateralArgs {
+                    condition_id: condition.condition_id,
+                    partition: vec![grouped, complement],
+                    amount: 10,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let first = index_set(&[0]);
+    let second = index_set(&[1]);
+    let (_, first_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        first,
+    );
+    let (_, second_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        second,
+    );
+    let valid_args = NativePositionArgs {
+        parent_collection_id: ROOT_COLLECTION_ID,
+        condition_id: condition.condition_id,
+        partition: vec![first, second],
+        amount: 1,
+    };
+
+    for args in [
+        NativePositionArgs {
+            amount: 0,
+            ..valid_args.clone()
+        },
+        NativePositionArgs {
+            partition: vec![first, index_set(&[0, 1])],
+            ..valid_args.clone()
+        },
+        NativePositionArgs {
+            amount: 11,
+            ..valid_args.clone()
+        },
+    ] {
+        assert!(context
+            .send(
+                split_position_instruction(payer, mint, grouped_collection, args),
+                TransactionVersion::V0,
+            )
+            .is_err());
+        assert_eq!(context.balance(payer, grouped_position).amount, 10);
+        assert_eq!(context.balance(payer, first_position).amount, 0);
+        assert_eq!(context.balance(payer, second_position).amount, 0);
+    }
+
+    let mut missing_pair =
+        split_position_instruction(payer, mint, grouped_collection, valid_args.clone());
+    missing_pair.accounts.pop();
+    assert!(context.send(missing_pair, TransactionVersion::V0).is_err());
+
+    let mut wrong_order =
+        split_position_instruction(payer, mint, grouped_collection, valid_args.clone());
+    wrong_order.accounts.swap(5, 7);
+    assert!(context.send(wrong_order, TransactionVersion::V0).is_err());
+
+    let mut wrong_source =
+        split_position_instruction(payer, mint, grouped_collection, valid_args.clone());
+    wrong_source.accounts[2] = wrong_source.accounts[5].clone();
+    wrong_source.accounts[3] = wrong_source.accounts[6].clone();
+    assert!(context.send(wrong_source, TransactionVersion::V0).is_err());
+
+    let mut duplicate =
+        split_position_instruction(payer, mint, grouped_collection, valid_args.clone());
+    duplicate.accounts[7] = duplicate.accounts[5].clone();
+    assert!(context.send(duplicate, TransactionVersion::V0).is_err());
+
+    let wrong_parent_args = NativePositionArgs {
+        parent_collection_id: grouped_collection,
+        ..valid_args.clone()
+    };
+    assert!(context
+        .send(
+            split_position_instruction(
+                payer,
+                mint,
+                grouped_collection,
+                wrong_parent_args,
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+
+    let other_mint = context.create_mint(token_program, None);
+    context
+        .send(
+            register_collateral_instruction(payer, other_mint, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let (_, other_first_position) = prepare_position(
+        &mut context,
+        other_mint,
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        first,
+    );
+    let mut wrong_collateral =
+        split_position_instruction(payer, mint, grouped_collection, valid_args.clone());
+    wrong_collateral.accounts[5] =
+        AccountMeta::new_readonly(position_address(other_first_position), false);
+    wrong_collateral.accounts[6] =
+        AccountMeta::new(balance_address(payer, other_first_position), false);
+    assert!(context
+        .send(wrong_collateral, TransactionVersion::V0)
+        .is_err());
+
+    let full_partition_args = NativePositionArgs {
+        parent_collection_id: ROOT_COLLECTION_ID,
+        condition_id: condition.condition_id,
+        partition: vec![grouped, complement],
+        amount: 1,
+    };
+    assert!(context
+        .send(
+            split_position_instruction(
+                payer,
+                mint,
+                grouped_collection,
+                full_partition_args,
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+
+    let first_balance_address = balance_address(payer, first_position);
+    let mut first_balance_account = context.svm.get_account(&first_balance_address).unwrap();
+    let mut first_balance: PositionBalance = deserialize_account(&first_balance_account.data);
+    first_balance.amount = u64::MAX;
+    first_balance_account.data = serialize_account(&first_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(first_balance_address, first_balance_account.clone())
+        .unwrap();
+    assert!(context
+        .send(
+            split_position_instruction(payer, mint, grouped_collection, valid_args.clone()),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert_eq!(context.balance(payer, grouped_position).amount, 10);
+    assert_eq!(context.balance(payer, second_position).amount, 0);
+
+    first_balance.amount = 0;
+    first_balance_account.data = serialize_account(&first_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(first_balance_address, first_balance_account)
+        .unwrap();
+    context
+        .send(
+            split_position_instruction(payer, mint, grouped_collection, valid_args.clone()),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let mut wrong_destination =
+        merge_positions_instruction(payer, mint, grouped_collection, valid_args.clone());
+    wrong_destination.accounts[2] = wrong_destination.accounts[5].clone();
+    wrong_destination.accounts[3] = wrong_destination.accounts[6].clone();
+    assert!(context
+        .send(wrong_destination, TransactionVersion::V0)
+        .is_err());
+    assert_eq!(context.balance(payer, grouped_position).amount, 9);
+    assert_eq!(context.balance(payer, first_position).amount, 1);
+    assert_eq!(context.balance(payer, second_position).amount, 1);
+
+    let grouped_balance_address = balance_address(payer, grouped_position);
+    let mut grouped_balance_account = context.svm.get_account(&grouped_balance_address).unwrap();
+    let mut grouped_balance: PositionBalance = deserialize_account(&grouped_balance_account.data);
+    grouped_balance.amount = u64::MAX;
+    grouped_balance_account.data = serialize_account(&grouped_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(grouped_balance_address, grouped_balance_account.clone())
+        .unwrap();
+    assert!(context
+        .send(
+            merge_positions_instruction(
+                payer,
+                mint,
+                grouped_collection,
+                valid_args.clone(),
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert_eq!(context.balance(payer, first_position).amount, 1);
+    assert_eq!(context.balance(payer, second_position).amount, 1);
+
+    grouped_balance.amount = 9;
+    grouped_balance_account.data = serialize_account(&grouped_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(grouped_balance_address, grouped_balance_account)
+        .unwrap();
+    assert!(context
+        .send(
+            merge_positions_instruction(
+                payer,
+                mint,
+                grouped_collection,
+                NativePositionArgs {
+                    amount: 2,
+                    ..valid_args
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert_eq!(context.balance(payer, grouped_position).amount, 9);
+    assert_eq!(context.balance(payer, first_position).amount, 1);
+    assert_eq!(context.balance(payer, second_position).amount, 1);
+    assert_eq!(context.token_amount(owner_account), 10);
+    assert_eq!(context.token_amount(vault_address(mint, token_program)), 10);
 }
 
 #[test]
