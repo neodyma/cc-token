@@ -44,6 +44,10 @@ pub enum CcTokenError {
     IdentityPoint,
     #[msg("Collection account does not match its registered definition")]
     CollectionMismatch,
+    #[msg("Collateral mint uses an unsupported Token-2022 extension")]
+    UnsupportedCollateralExtension,
+    #[msg("Collateral account does not match its registered definition")]
+    CollateralMismatch,
     #[msg("Only the condition resolver may report payouts")]
     UnauthorizedResolver,
     #[msg("Condition payouts have already been reported")]

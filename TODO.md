@@ -37,9 +37,9 @@
 - [x] `CollectionDefinition`
 - [x] `prepare_condition`
 - [x] `register_collection`
-- [ ] Collateral mint registration
-- [ ] Collateral policy and Token/Token-2022 validation
-- [ ] Canonical collateral vault creation
+- [x] Collateral mint registration
+- [x] Collateral policy and Token/Token-2022 validation
+- [x] Canonical collateral vault creation
 - [ ] `PositionDefinition`
 - [ ] `PositionBalance`
 - [ ] Balance initialization

@@ -20,6 +20,14 @@ pub struct CollectionRegistered {
 }
 
 #[event]
+pub struct CollateralRegistered {
+    pub mint: Pubkey,
+    pub token_program: Pubkey,
+    pub vault: Pubkey,
+    pub decimals: u8,
+}
+
+#[event]
 pub struct PayoutsReported {
     pub condition_id: [u8; 32],
     pub resolver: Pubkey,
