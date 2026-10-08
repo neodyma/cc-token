@@ -42,6 +42,7 @@ import {
   fetchCondition,
   fetchMaybePayoutReport,
   fetchPayoutReport,
+  fetchPositionHoldings,
   fetchVerifiedCollection,
   fetchVerifiedCondition,
   fetchVerifiedPosition,
@@ -537,7 +538,11 @@ test("generated client submits the native lifecycle through v0 and v1", async ()
     }),
     v0Only,
   );
-  assert.equal((await fetchToken(rpc, payerWrapperAccount)).data.amount, 60n);
+  const payerWrapper = await fetchToken(rpc, payerWrapperAccount);
+  assert.equal(payerWrapper.programAddress, TOKEN_2022_PROGRAM_ADDRESS);
+  assert.equal(payerWrapper.data.owner, payer.address);
+  assert.equal(payerWrapper.data.mint, wrapperMint);
+  assert.equal(payerWrapper.data.amount, 60n);
   assert.equal((await fetchMint(rpc, wrapperMint)).data.supply, 60n);
   const wrappedPayerBalance = await fetchVerifiedPositionBalance(
     rpc,
@@ -545,6 +550,10 @@ test("generated client submits the native lifecycle through v0 and v1", async ()
     rootPositionIds[0]!,
   );
   assert.equal(wrappedPayerBalance.exists && wrappedPayerBalance.account.data.amount, 240n);
+  const payerHoldings = await fetchPositionHoldings(rpc, payer.address, rootPositionIds[0]!);
+  assert.equal(payerHoldings.nativeAmount, 240n);
+  assert.equal(payerHoldings.wrapper?.amount, 60n);
+  assert.equal(payerHoldings.totalAmount, 300n);
 
   await sendInstruction(
     payer,
@@ -561,6 +570,14 @@ test("generated client submits the native lifecycle through v0 and v1", async ()
     ),
     v0Only,
   );
+  const transferredHoldings = await fetchPositionHoldings(
+    rpc,
+    transferRecipient.address,
+    rootPositionIds[0]!,
+  );
+  assert.equal(transferredHoldings.nativeAmount, 0n);
+  assert.equal(transferredHoldings.wrapper?.amount, 60n);
+  assert.equal(transferredHoldings.totalAmount, 60n);
   await fund(transferRecipient.address);
   await sendInstruction(
     payer,
@@ -582,6 +599,14 @@ test("generated client submits the native lifecycle through v0 and v1", async ()
     unwrappedRecipientBalance.exists && unwrappedRecipientBalance.account.data.amount,
     60n,
   );
+  const unwrappedHoldings = await fetchPositionHoldings(
+    rpc,
+    transferRecipient.address,
+    rootPositionIds[0]!,
+  );
+  assert.equal(unwrappedHoldings.nativeAmount, 60n);
+  assert.equal(unwrappedHoldings.wrapper?.amount, 0n);
+  assert.equal(unwrappedHoldings.totalAmount, 60n);
   await sendInstruction(
     payer,
     await getTransferNativePositionInstruction({

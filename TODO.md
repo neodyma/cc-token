@@ -114,13 +114,13 @@
 - [x] Partition and payout helpers
 - [x] Transaction-version selection
 - [x] Complete definition retrieval
-- [ ] Balance discovery across representations
+- [x] Balance discovery across representations
 - [x] Logical subset normalization
 - [x] Explicit repeated-factor construction
 - [x] Split, merge, transfer, resolution, redemption and wrapper builders
-- [ ] Transaction capacity estimation
-- [ ] Large-operation planning into complete resumable steps
-- [ ] Simulation, submission, confirmation and refetch behavior
+- [x] Transaction capacity estimation
+- [x] Large-operation planning into complete resumable steps
+- [x] Simulation, submission, confirmation and refetch behavior
 - [ ] Stable public SDK API
 
 ## 9. Scenario Composer
@@ -145,7 +145,7 @@
 - [ ] Supported collateral and authority documentation
 - [ ] Rounding and resolution documentation
 - [ ] Compression availability documentation (deferred)
-- [ ] Transaction-version and practical-capacity documentation
+- [x] Transaction-version and practical-capacity documentation
 - [ ] Implementation-aligned architecture diagram
 - [ ] Public protocol and API documentation
 - [ ] Deployment checklist (devnet)
