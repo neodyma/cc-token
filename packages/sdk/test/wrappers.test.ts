@@ -9,9 +9,7 @@ import {
   deriveCollectionId,
   derivePositionId,
   getPositionAddress,
-  getPositionDefinitionDiscriminatorBytes,
   getWrapperAddress,
-  getWrapperConfigDiscriminatorBytes,
   getWrapperMintAddress,
   ROOT_COLLECTION_ID,
   TOKEN_2022_PROGRAM_ADDRESS,
@@ -19,6 +17,10 @@ import {
   type PositionDefinition,
   type WrapperConfig,
 } from "../src/index.ts";
+import {
+  getPositionDefinitionDiscriminatorBytes,
+  getWrapperConfigDiscriminatorBytes,
+} from "../src/generated/index.ts";
 
 const firstCollateral = address("So11111111111111111111111111111111111111112");
 const secondCollateral = address("Vote111111111111111111111111111111111111111");

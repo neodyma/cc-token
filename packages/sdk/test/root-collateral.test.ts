@@ -11,12 +11,12 @@ import {
   getPositionAddress,
   getPositionBalanceAddress,
   getRootCollateralSetupInstructions,
-  getSplitFromCollateralInstructionDataDecoder,
   getSplitRootCollateralInstruction,
   ROOT_COLLECTION_ID,
   TOKEN_2022_PROGRAM_ADDRESS,
   type IndexSetWords,
 } from "../src/index.ts";
+import { getSplitFromCollateralInstructionDataDecoder } from "../src/generated/index.ts";
 
 const resolver = address("11111111111111111111111111111111");
 const mint = address("So11111111111111111111111111111111111111112");

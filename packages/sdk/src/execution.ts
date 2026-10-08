@@ -126,13 +126,25 @@ export async function executeConfirmedPlan<
         continue;
       }
       if (reconciliation.status === "pending") {
-        throw executionError(
-          "reconciliation",
-          step,
-          new Error("transaction status is unresolved"),
-          completed,
-          existingCheckpoint,
-        );
+        try {
+          await adapter.confirm(existingCheckpoint.signature, step);
+          reconciliation = await reconcileExecutionCheckpoint(step, existingCheckpoint, adapter);
+        } catch (cause) {
+          throw executionError("reconciliation", step, cause, completed, existingCheckpoint);
+        }
+        if (reconciliation.status === "complete") {
+          completed.push(reconciliation.receipt);
+          continue;
+        }
+        if (reconciliation.status === "pending") {
+          throw executionError(
+            "reconciliation",
+            step,
+            new Error("transaction status is unresolved"),
+            completed,
+            existingCheckpoint,
+          );
+        }
       }
     }
 

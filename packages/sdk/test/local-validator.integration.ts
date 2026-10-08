@@ -19,7 +19,12 @@ import {
   signTransactionMessageWithSigners,
   type Address,
   type Instruction,
+  type Signature,
 } from "@solana/kit";
+import {
+  getCreateLookupTableInstructionAsync,
+  getExtendLookupTableInstruction,
+} from "@solana-program/address-lookup-table";
 import {
   fetchMint,
   fetchToken,
@@ -37,12 +42,8 @@ import {
   derivePositionId,
   CC_TOKEN_PROGRAM_ADDRESS,
   CollateralFreezeAuthority,
+  createKitExecutionAdapter,
   DefinitionVerificationError,
-  fetchCollateralConfig,
-  fetchCollectionDefinition,
-  fetchCondition,
-  fetchMaybePayoutReport,
-  fetchPayoutReport,
   fetchPositionHoldings,
   fetchVerifiedCollection,
   fetchVerifiedCondition,
@@ -50,6 +51,7 @@ import {
   fetchVerifiedPositionBalance,
   fetchVerifiedWrapper,
   fetchVerifiedWrapperByMint,
+  executeConfirmedPlan,
   getAppendPayoutReportInstruction,
   getBatchTransferNativePositionsInstruction,
   getBatchTransferSetupInstructions,
@@ -82,11 +84,21 @@ import {
   getWrapNativePositionInstruction,
   getWrapperMintAddress,
   planPayoutReport,
+  MemoryPlanCheckpointStore,
+  PlanExecutionError,
+  type PreparedCcTokenTransaction,
   ROOT_COLLECTION_ID,
   selectTransactionVersion,
   TOKEN_2022_PROGRAM_ADDRESS,
   type CcTokenTransactionVersion,
 } from "../src/index.ts";
+import {
+  fetchCollateralConfig,
+  fetchCollectionDefinition,
+  fetchCondition,
+  fetchMaybePayoutReport,
+  fetchPayoutReport,
+} from "../src/generated/index.ts";
 
 const rpcUrl = process.env.CC_TOKEN_RPC_URL;
 const websocketUrl = process.env.CC_TOKEN_WS_URL;
@@ -945,4 +957,157 @@ test("generated client submits the native lifecycle through v0 and v1", async ()
   assert.equal(stagedCondition.data.payoutDenominator, 7n);
   assert.deepEqual(stagedCondition.data.payoutNumerators, stagedPayouts);
   assert.equal((await fetchMaybePayoutReport(rpc, payoutReportAddress)).exists, false);
+
+  const transferQuestionId = new Uint8Array(32).fill(31);
+  const transferConditionId = deriveConditionId(payer.address, transferQuestionId, 16);
+  const [transferConditionAddress] = await getConditionAddress(transferConditionId);
+  await sendInstruction(
+    payer,
+    getPrepareConditionInstruction({
+      payer,
+      condition: transferConditionAddress,
+      conditionId: transferConditionId,
+      resolver: payer.address,
+      questionId: transferQuestionId,
+      outcomeCount: 16,
+    }),
+    v0Only,
+  );
+  const transferPartition = Array.from(
+    { length: 16 },
+    (_, index) => [1n << BigInt(index), 0n, 0n, 0n] as const,
+  );
+  const transferSetup = await getRootCollateralSetupInstructions({
+    payer,
+    owner: payer.address,
+    collateralMint: mint.address,
+    conditionId: transferConditionId,
+    outcomeCount: 16,
+    partition: transferPartition,
+  });
+  for (const instruction of transferSetup) {
+    await sendInstruction(payer, instruction, v0Only);
+  }
+  await sendInstruction(
+    payer,
+    await getSplitRootCollateralInstruction({
+      owner: payer,
+      ownerTokenAccount,
+      collateralMint: mint.address,
+      tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      conditionId: transferConditionId,
+      outcomeCount: 16,
+      partition: transferPartition,
+      amount: 10n,
+    }),
+    v1Capable,
+  );
+  const transferPositionIds = transferPartition.map((indexSet) =>
+    derivePositionId(
+      mint.address,
+      deriveCollectionId(ROOT_COLLECTION_ID, transferConditionId, indexSet).collectionId,
+    ),
+  );
+  const resumableRecipient = await generateKeyPairSigner();
+  const resumableTransfers = transferPositionIds.map((positionId) => ({
+    positionId,
+    amount: 1n,
+  }));
+  for (const instruction of await getBatchTransferSetupInstructions({
+    payer,
+    recipient: resumableRecipient.address,
+    transfers: resumableTransfers,
+  })) {
+    await sendInstruction(payer, instruction, v0Only);
+  }
+  const resumableTransferInstruction = await getBatchTransferNativePositionsInstruction({
+    owner: payer,
+    recipient: resumableRecipient.address,
+    transfers: resumableTransfers,
+  });
+
+  const recentSlot = await rpc.getSlot({ commitment: "finalized" }).send();
+  const createLookupTable = await getCreateLookupTableInstructionAsync({
+    authority: payer,
+    payer,
+    recentSlot,
+  });
+  const lookupTableAddress = createLookupTable.accounts[0].address;
+  await sendInstruction(payer, createLookupTable, v0Only);
+  const lookupAddresses = [
+    ...new Set((resumableTransferInstruction.accounts ?? []).map((account) => account.address)),
+  ];
+  for (let offset = 0; offset < lookupAddresses.length; offset += 20) {
+    await sendInstruction(
+      payer,
+      getExtendLookupTableInstruction({
+        address: lookupTableAddress,
+        authority: payer,
+        payer,
+        addresses: lookupAddresses.slice(offset, offset + 20),
+      }),
+      v0Only,
+    );
+  }
+  const extensionSlot = await rpc.getSlot({ commitment: "confirmed" }).send();
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if ((await rpc.getSlot({ commitment: "confirmed" }).send()) > extensionSlot) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  const resumableStep = {
+    id: "resumable-alt-transfer:0",
+    planId: "resumable-alt-transfer",
+    kind: "execute",
+    instructions: [resumableTransferInstruction],
+  } as const;
+  const checkpointStore = new MemoryPlanCheckpointStore<
+    PreparedCcTokenTransaction,
+    Signature,
+    readonly bigint[]
+  >();
+  const refetchResumableBalances = async () =>
+    Promise.all(
+      transferPositionIds.map(async (positionId) => {
+        const balance = await fetchVerifiedPositionBalance(
+          rpc,
+          resumableRecipient.address,
+          positionId,
+        );
+        return balance.exists ? balance.account.data.amount : 0n;
+      }),
+    );
+  const executionAdapter = createKitExecutionAdapter({
+    rpc,
+    feePayer: payer,
+    checkpointStore,
+    version: v0Only,
+    lookupTableAddresses: [lookupTableAddress],
+    computeUnitLimit: 300_000,
+    confirmationPollIntervalMs: 100,
+    async refetch() {
+      return refetchResumableBalances();
+    },
+  });
+  await assert.rejects(
+    () =>
+      executeConfirmedPlan([resumableStep], {
+        ...executionAdapter,
+        async submit(transaction, step) {
+          await executionAdapter.submit(transaction, step);
+          throw new Error("RPC response lost after submission");
+        },
+      }),
+    (error) => error instanceof PlanExecutionError && error.phase === "submission",
+  );
+  const submittedCheckpoint = await checkpointStore.load(resumableStep.planId, resumableStep.id);
+  assert.equal(submittedCheckpoint?.status, "prepared");
+  if (!submittedCheckpoint) throw new Error("expected a prepared transfer checkpoint");
+  const resumedReceipts = await executeConfirmedPlan([resumableStep], executionAdapter);
+  assert.equal(resumedReceipts[0]?.signature, submittedCheckpoint.signature);
+  assert.deepEqual(resumedReceipts[0]?.state, Array<bigint>(16).fill(1n));
+  for (const positionId of transferPositionIds) {
+    const ownerBalance = await fetchVerifiedPositionBalance(rpc, payer.address, positionId);
+    assert.equal(ownerBalance.exists && ownerBalance.account.data.amount, 9n);
+  }
 });

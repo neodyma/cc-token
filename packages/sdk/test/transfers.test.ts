@@ -5,14 +5,16 @@ import { AccountRole, address, generateKeyPairSigner } from "@solana/kit";
 
 import {
   getBatchTransferNativePositionsInstruction,
-  getBatchTransferPositionsInstructionDataDecoder,
   getBatchTransferSetupInstructions,
   getPositionAddress,
   getPositionBalanceAddress,
-  getTransferPositionInstructionDataDecoder,
   getTransferNativePositionInstruction,
   normalizeBatchTransfers,
 } from "../src/index.ts";
+import {
+  getBatchTransferPositionsInstructionDataDecoder,
+  getTransferPositionInstructionDataDecoder,
+} from "../src/generated/index.ts";
 
 const recipient = address("So11111111111111111111111111111111111111112");
 

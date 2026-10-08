@@ -16,6 +16,7 @@ import {
   type Rpc,
   type TransactionSigner,
 } from "@solana/kit";
+import { getSetComputeUnitLimitInstruction } from "@solana-program/compute-budget";
 
 import {
   DEFAULT_V1_COMPUTE_UNIT_LIMIT,
@@ -23,6 +24,8 @@ import {
 } from "./transaction-capacity.ts";
 
 export type CcTokenTransactionVersion = 0 | 1;
+
+const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
 
 export type CcTokenBlockhashLifetime = Readonly<{
   blockhash: Blockhash;
@@ -53,9 +56,24 @@ export async function buildCcTokenTransaction(input: {
   computeUnitLimit?: number;
   loadedAccountsDataSizeLimit?: number;
 }) {
+  if (
+    input.computeUnitLimit !== undefined &&
+    (!Number.isInteger(input.computeUnitLimit) ||
+      input.computeUnitLimit < 1 ||
+      input.computeUnitLimit > MAX_COMPUTE_UNIT_LIMIT)
+  ) {
+    throw new RangeError("computeUnitLimit must be between 1 and 1,400,000");
+  }
   if (input.version === 0) {
+    const instructions =
+      input.computeUnitLimit === undefined
+        ? input.instructions
+        : [
+            getSetComputeUnitLimitInstruction({ units: input.computeUnitLimit }),
+            ...input.instructions,
+          ];
     let message = appendTransactionMessageInstructions(
-      input.instructions,
+      instructions,
       setTransactionMessageFeePayerSigner(input.feePayer, createTransactionMessage({ version: 0 })),
     );
     if (input.lookupTables && input.lookupTables.addresses.length > 0) {

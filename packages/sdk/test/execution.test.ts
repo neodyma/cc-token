@@ -215,6 +215,53 @@ test("reconciles a stored checkpoint before rebuilding", async () => {
   assert.equal(receipts[0]?.signature, "replacement-signature");
 });
 
+test("waits for an unresolved stored signature before considering a replacement", async () => {
+  let status: "unknown" | "confirmed" = "unknown";
+  let checkpoint: ExecutionCheckpoint<string, string, string> = {
+    planId,
+    stepId: steps[0].id,
+    transaction: "original-transaction",
+    signature: "original-signature",
+    status: "prepared",
+  };
+  let buildCount = 0;
+  let confirmCount = 0;
+  const receipts = await executeConfirmedPlan([steps[0]], {
+    async loadCheckpoint() {
+      return checkpoint;
+    },
+    async getStatus() {
+      return status;
+    },
+    async buildTransaction() {
+      buildCount += 1;
+      return "replacement-transaction";
+    },
+    getSignature() {
+      return "replacement-signature";
+    },
+    async simulate() {
+      return { err: null };
+    },
+    async recordCheckpoint(value) {
+      checkpoint = value;
+    },
+    async submit() {},
+    async confirm() {
+      confirmCount += 1;
+      status = "confirmed";
+    },
+    async refetch() {
+      return "current-state";
+    },
+  });
+
+  assert.equal(buildCount, 0);
+  assert.equal(confirmCount, 1);
+  assert.equal(receipts[0]?.signature, "original-signature");
+  assert.equal(receipts[0]?.state, "current-state");
+});
+
 test("does not submit when the prepared checkpoint cannot be persisted", async () => {
   let submitted = false;
   await assert.rejects(

@@ -124,7 +124,7 @@
 - [x] Large-operation planning into complete resumable steps
 - [x] Plan-scoped execution checkpoints and reconciliation
 - [x] Simulation, submission, confirmation and refetch behavior
-- [ ] Stable public SDK API
+- [x] Stable public SDK API
 
 ## 9. Scenario Composer
 

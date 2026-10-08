@@ -95,6 +95,24 @@ test("builds signed v0 and v1 transactions from the selected plan", async () => 
   }
 });
 
+test("rejects compute limits above the cluster ceiling", async () => {
+  const owner = await generateKeyPairSigner();
+  await assert.rejects(
+    () =>
+      buildCcTokenTransaction({
+        version: 0,
+        feePayer: owner,
+        instructions: [],
+        lifetime: {
+          blockhash: blockhash("11111111111111111111111111111111"),
+          lastValidBlockHeight: 100n,
+        },
+        computeUnitLimit: 1_400_001,
+      }),
+    /computeUnitLimit/,
+  );
+});
+
 test("fetches lookup-table contents at the signing boundary", async () => {
   const owner = await generateKeyPairSigner();
   const instruction = await getBatchTransferNativePositionsInstruction({

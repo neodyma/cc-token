@@ -10,10 +10,10 @@ import {
   getPositionBalanceAddress,
   getRedeemNativePositionInstruction,
   getRedeemNativePositionSetupInstructions,
-  getRedeemPositionInstructionDataDecoder,
   getRedeemRootCollateralInstruction,
   ROOT_COLLECTION_ID,
 } from "../src/index.ts";
+import { getRedeemPositionInstructionDataDecoder } from "../src/generated/index.ts";
 
 const collateralMint = address("So11111111111111111111111111111111111111112");
 const tokenAccount = address("SysvarRent111111111111111111111111111111111");

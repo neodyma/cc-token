@@ -28,6 +28,10 @@ submission. Simulation remains responsible for runtime compute, account-data and
 validation. Transfer instruction data also commits the recipient and ordered position IDs; the
 program rejects resolved accounts that do not match that signed intent.
 
+Version-0 transactions can request an explicit compute-unit limit through
+`buildCcTokenTransaction`. The builder adds the Compute Budget instruction before the protocol
+instructions. Version 1 carries the limit in its message configuration.
+
 ## Large operations
 
 Complete refinements are divided into transitions of at most 16 children. Each intermediate split
@@ -50,10 +54,17 @@ before submission. It records submitted, confirmed and refetched states in order
 simulation is never submitted. Errors identify the plan, phase and step, retain prior receipts and
 include the latest checkpoint.
 
-`reconcileExecutionCheckpoint` checks an interrupted step by its original signature. An unknown
-signature remains pending and is not rebuilt. A confirmed transaction resumes at refetch. A new
-transaction may be built only after the original signature is definitively failed or expired. The
-application chooses the durable checkpoint store.
+`reconcileExecutionCheckpoint` checks an interrupted step by its original signature. The executor
+waits for a pending signature through the adapter before it considers a replacement. A confirmed
+transaction resumes at refetch. A new transaction may be built only after the original signature
+is definitively failed or expired.
+
+`createKitExecutionAdapter` uses one RPC for blockhashes, lookup-table loading, simulation,
+submission and status checks. It verifies that the signature returned by the RPC matches the signed
+transaction. `MemoryPlanCheckpointStore` supports transient execution and tests.
+`WebStoragePlanCheckpointStore` preserves signed transaction bytes, signatures, bigints and
+refetched state for browser restarts. Persist the store before allowing users to submit resumable
+plans.
 
 The program deliberately allows an owner to authorize the same split or transfer more than once.
 Those are distinct valid operations, so the contract cannot classify a newly signed repetition as

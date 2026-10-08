@@ -11,13 +11,9 @@ import {
   deriveConditionId,
   derivePositionId,
   getCollectionAddress,
-  getCollectionDefinitionDiscriminatorBytes,
   getConditionAddress,
-  getConditionDiscriminatorBytes,
   getPositionAddress,
   getPositionBalanceAddress,
-  getPositionBalanceDiscriminatorBytes,
-  getPositionDefinitionDiscriminatorBytes,
   ROOT_COLLECTION_ID,
   verifyCollectionAccount,
   verifyConditionAccount,
@@ -31,6 +27,12 @@ import {
   type VerifiedCollateral,
   type VerifiedCollection,
 } from "../src/index.ts";
+import {
+  getCollectionDefinitionDiscriminatorBytes,
+  getConditionDiscriminatorBytes,
+  getPositionBalanceDiscriminatorBytes,
+  getPositionDefinitionDiscriminatorBytes,
+} from "../src/generated/index.ts";
 
 const resolver = address("11111111111111111111111111111111");
 
