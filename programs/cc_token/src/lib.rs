@@ -119,6 +119,13 @@ pub mod cc_token {
         settlement::redeem_position(ctx, args)
     }
 
+    pub fn redeem_to_collateral(
+        ctx: Context<RedeemToCollateral>,
+        args: RedeemPositionArgs,
+    ) -> CcTokenResult {
+        settlement::redeem_to_collateral(ctx, args)
+    }
+
     pub fn initialize_wrapper(ctx: Context<InitializeWrapper>) -> CcTokenResult {
         wrapping::initialize_wrapper(ctx)
     }
