@@ -48,6 +48,14 @@ pub enum CcTokenError {
     UnsupportedCollateralExtension,
     #[msg("Collateral account does not match its registered definition")]
     CollateralMismatch,
+    #[msg("Position ID does not match its definition")]
+    InvalidPositionId,
+    #[msg("Position account does not match its registered definition")]
+    PositionMismatch,
+    #[msg("Position balance does not match its registered owner and position")]
+    PositionBalanceMismatch,
+    #[msg("A nonzero position balance cannot be closed")]
+    NonzeroPositionBalance,
     #[msg("Only the condition resolver may report payouts")]
     UnauthorizedResolver,
     #[msg("Condition payouts have already been reported")]

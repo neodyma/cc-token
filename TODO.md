@@ -40,12 +40,12 @@
 - [x] Collateral mint registration
 - [x] Collateral policy and Token/Token-2022 validation
 - [x] Canonical collateral vault creation
-- [ ] `PositionDefinition`
-- [ ] `PositionBalance`
-- [ ] Balance initialization
-- [ ] Zero-balance closure and reopening
+- [x] `PositionDefinition`
+- [x] `PositionBalance`
+- [x] Balance initialization
+- [x] Zero-balance closure and reopening
 - [ ] SDK retrieval and verification for every definition
-- [ ] Runtime tests for the complete lifecycle
+- [x] Runtime tests for the complete lifecycle
 
 ## 4. Native position operations
 

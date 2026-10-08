@@ -35,8 +35,11 @@ pub mod cc_token {
         definitions::register_collection(ctx, args)
     }
 
-    pub fn register_position(ctx: Context<RegisterPosition>) -> CcTokenResult {
-        definitions::register_position(ctx)
+    pub fn register_position(
+        ctx: Context<RegisterPosition>,
+        args: RegisterPositionArgs,
+    ) -> CcTokenResult {
+        definitions::register_position(ctx, args)
     }
 
     pub fn initialize_balance(ctx: Context<InitializeBalance>) -> CcTokenResult {

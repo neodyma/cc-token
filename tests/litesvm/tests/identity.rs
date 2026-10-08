@@ -11,16 +11,18 @@ use anchor_spl::{
 use cc_token::{
     accounts,
     constants::{
-        COLLATERAL_POLICY_VERSION, COLLATERAL_SEED, COLLECTION_SEED, CONDITION_SEED,
-        ROOT_COLLECTION_ID, STATE_VERSION, VAULT_SEED,
+        BALANCE_SEED, COLLATERAL_POLICY_VERSION, COLLATERAL_SEED, COLLECTION_SEED,
+        CONDITION_SEED, POSITION_SEED, ROOT_COLLECTION_ID, STATE_VERSION, VAULT_SEED,
     },
-    identity::derive_collection_id,
+    identity::{derive_collection_id, derive_position_id},
     instruction,
     instructions::{
-        definitions::RegisterCollectionArgs, setup::PrepareConditionArgs,
+        definitions::{RegisterCollectionArgs, RegisterPositionArgs}, setup::PrepareConditionArgs,
     },
     math::IndexSet,
-    state::{CollateralConfig, CollectionDefinition, Condition},
+    state::{
+        CollateralConfig, CollectionDefinition, Condition, PositionBalance, PositionDefinition,
+    },
     ID,
 };
 use litesvm::{types::TransactionMetadata, LiteSVM};
@@ -165,6 +167,47 @@ impl TestContext {
                 .data,
         )
     }
+
+    fn position(&self, position_id: [u8; 32]) -> PositionDefinition {
+        deserialize_account(
+            &self
+                .svm
+                .get_account(&position_address(position_id))
+                .unwrap()
+                .data,
+        )
+    }
+
+    fn balance(&self, owner: Address, position_id: [u8; 32]) -> PositionBalance {
+        deserialize_account(
+            &self
+                .svm
+                .get_account(&balance_address(owner, position_id))
+                .unwrap()
+                .data,
+        )
+    }
+
+    fn send_with_owner(
+        &mut self,
+        instruction: Instruction,
+        owner: &Keypair,
+    ) -> Result<TransactionMetadata, litesvm::types::FailedTransactionMetadata> {
+        self.svm.expire_blockhash();
+        let payer = self.payer.pubkey();
+        let message = VersionedMessage::V0(
+            v0::Message::try_compile(
+                &payer,
+                &[instruction],
+                &[],
+                self.svm.latest_blockhash(),
+            )
+            .unwrap(),
+        );
+        let transaction =
+            VersionedTransaction::try_new(message, &[&self.payer, owner]).unwrap();
+        self.svm.send_transaction(transaction)
+    }
 }
 
 fn program_path() -> PathBuf {
@@ -189,6 +232,14 @@ fn condition_address(condition_id: [u8; 32]) -> Address {
 
 fn collection_address(collection_id: [u8; 32]) -> Address {
     Address::find_program_address(&[COLLECTION_SEED, &collection_id], &ID).0
+}
+
+fn position_address(position_id: [u8; 32]) -> Address {
+    Address::find_program_address(&[POSITION_SEED, &position_id], &ID).0
+}
+
+fn balance_address(owner: Address, position_id: [u8; 32]) -> Address {
+    Address::find_program_address(&[BALANCE_SEED, owner.as_ref(), &position_id], &ID).0
 }
 
 fn prepare_condition_instruction(payer: Address, args: PrepareConditionArgs) -> Instruction {
@@ -220,6 +271,57 @@ fn register_collection_instruction(
         }
         .to_account_metas(None),
         data: instruction::RegisterCollection { args }.data(),
+    }
+}
+
+fn register_position_instruction(payer: Address, args: RegisterPositionArgs) -> Instruction {
+    Instruction {
+        program_id: ID,
+        accounts: accounts::RegisterPosition {
+            payer,
+            collateral_config: collateral_config_address(args.collateral_mint),
+            collection: collection_address(args.collection_id),
+            position: position_address(args.position_id),
+            system_program: System::id(),
+        }
+        .to_account_metas(None),
+        data: instruction::RegisterPosition { args }.data(),
+    }
+}
+
+fn initialize_balance_instruction(
+    payer: Address,
+    owner: Address,
+    position_id: [u8; 32],
+) -> Instruction {
+    Instruction {
+        program_id: ID,
+        accounts: accounts::InitializeBalance {
+            payer,
+            owner,
+            position: position_address(position_id),
+            balance: balance_address(owner, position_id),
+            system_program: System::id(),
+        }
+        .to_account_metas(None),
+        data: instruction::InitializeBalance {}.data(),
+    }
+}
+
+fn close_balance_instruction(
+    owner: Address,
+    position_id: [u8; 32],
+    balance: Address,
+) -> Instruction {
+    Instruction {
+        program_id: ID,
+        accounts: accounts::CloseBalance {
+            owner,
+            position: position_address(position_id),
+            balance,
+        }
+        .to_account_metas(None),
+        data: instruction::CloseBalance {}.data(),
     }
 }
 
@@ -386,6 +488,147 @@ fn unsupported_collateral_leaves_no_config_or_vault() {
             .svm
             .get_account(&vault_address(mint, token_program))
             .is_none());
+    }
+}
+
+#[test]
+fn position_definitions_and_balances_are_canonical_and_reopenable() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let mint = context.create_mint(anchor_spl::token::ID, None);
+    context
+        .send(
+            register_collateral_instruction(payer, mint, anchor_spl::token::ID),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let condition = condition_args(Pubkey::new_from_array([41; 32]), [42; 32], 2);
+    context
+        .send(
+            prepare_condition_instruction(payer, condition.clone()),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let collection = register_args(
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        IndexSet {
+            words: [1, 0, 0, 0],
+        },
+    );
+    context
+        .send(
+            register_collection_instruction(payer, collection.clone(), None),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let position_id = derive_position_id(&mint, collection.collection_id).unwrap();
+    let position_args = RegisterPositionArgs {
+        position_id,
+        collateral_mint: mint,
+        collection_id: collection.collection_id,
+    };
+    let register_position = register_position_instruction(payer, position_args.clone());
+    let created = context
+        .send(register_position.clone(), TransactionVersion::V0)
+        .unwrap();
+    let position_before = context
+        .svm
+        .get_account(&position_address(position_id))
+        .unwrap()
+        .data;
+    let reused = context
+        .send(register_position, TransactionVersion::V0)
+        .unwrap();
+    assert_eq!(
+        context
+            .svm
+            .get_account(&position_address(position_id))
+            .unwrap()
+            .data,
+        position_before
+    );
+    let position = context.position(position_id);
+    assert_eq!(position.version, STATE_VERSION);
+    assert_eq!(position.position_id, position_id);
+    assert_eq!(position.collateral_mint, mint);
+    assert_eq!(position.collection_id, collection.collection_id);
+
+    let owner = Keypair::new();
+    context.svm.airdrop(&owner.pubkey(), 1_000_000).unwrap();
+    let initialize = initialize_balance_instruction(payer, owner.pubkey(), position_id);
+    let initialized = context
+        .send(initialize.clone(), TransactionVersion::V0)
+        .unwrap();
+    context
+        .send(initialize.clone(), TransactionVersion::V0)
+        .unwrap();
+    let balance = context.balance(owner.pubkey(), position_id);
+    assert_eq!(balance.version, STATE_VERSION);
+    assert_eq!(balance.owner, owner.pubkey());
+    assert_eq!(balance.position_id, position_id);
+    assert_eq!(balance.amount, 0);
+
+    let balance_address = balance_address(owner.pubkey(), position_id);
+    let attacker = Keypair::new();
+    context.svm.airdrop(&attacker.pubkey(), 1_000_000).unwrap();
+    let unauthorized = close_balance_instruction(attacker.pubkey(), position_id, balance_address);
+    assert!(context.send_with_owner(unauthorized, &attacker).is_err());
+    assert!(context.svm.get_account(&balance_address).is_some());
+
+    let mut stored_account = context.svm.get_account(&balance_address).unwrap();
+    let mut stored_balance: PositionBalance = deserialize_account(&stored_account.data);
+    stored_balance.amount = 1;
+    stored_account.data = serialize_account(&stored_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(balance_address, stored_account.clone())
+        .unwrap();
+    let close = close_balance_instruction(owner.pubkey(), position_id, balance_address);
+    let error = context.send_with_owner(close.clone(), &owner).unwrap_err();
+    assert!(error
+        .meta
+        .logs
+        .iter()
+        .any(|log| log.contains("nonzero position balance")));
+
+    stored_balance.amount = 0;
+    stored_account.data = serialize_account(&stored_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(balance_address, stored_account)
+        .unwrap();
+    let owner_lamports_before = context.svm.get_balance(&owner.pubkey()).unwrap();
+    context.send_with_owner(close, &owner).unwrap();
+    assert!(context.svm.get_account(&balance_address).is_none());
+    assert!(context.svm.get_balance(&owner.pubkey()).unwrap() > owner_lamports_before);
+
+    context
+        .send(initialize, TransactionVersion::V0)
+        .unwrap();
+    assert_eq!(context.balance(owner.pubkey(), position_id).amount, 0);
+
+    let invalid_position_id = [77; 32];
+    let invalid_args = RegisterPositionArgs {
+        position_id: invalid_position_id,
+        ..position_args
+    };
+    let error = context
+        .send(
+            register_position_instruction(payer, invalid_args),
+            TransactionVersion::V0,
+        )
+        .unwrap_err();
+    assert!(error.meta.logs.iter().any(|log| log.contains("Position ID")));
+    assert!(context
+        .svm
+        .get_account(&position_address(invalid_position_id))
+        .is_none());
+
+    for metadata in [&created, &reused, &initialized] {
+        assert_within_transaction_limit(metadata);
     }
 }
 

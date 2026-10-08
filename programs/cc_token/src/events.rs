@@ -28,6 +28,25 @@ pub struct CollateralRegistered {
 }
 
 #[event]
+pub struct PositionRegistered {
+    pub position_id: [u8; 32],
+    pub collateral_mint: Pubkey,
+    pub collection_id: [u8; 32],
+}
+
+#[event]
+pub struct PositionBalanceInitialized {
+    pub owner: Pubkey,
+    pub position_id: [u8; 32],
+}
+
+#[event]
+pub struct PositionBalanceClosed {
+    pub owner: Pubkey,
+    pub position_id: [u8; 32],
+}
+
+#[event]
 pub struct PayoutsReported {
     pub condition_id: [u8; 32],
     pub resolver: Pubkey,
