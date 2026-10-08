@@ -20,6 +20,8 @@ const COLLATERAL_SEED = new TextEncoder().encode("collateral");
 const VAULT_SEED = new TextEncoder().encode("vault");
 const POSITION_SEED = new TextEncoder().encode("position");
 const BALANCE_SEED = new TextEncoder().encode("balance");
+const WRAPPER_SEED = new TextEncoder().encode("wrapper");
+const WRAPPER_MINT_SEED = new TextEncoder().encode("wrapper_mint");
 
 export const ROOT_COLLECTION_ID = new Uint8Array(32);
 
@@ -150,6 +152,24 @@ export function getPositionBalanceAddress(
   return getProgramDerivedAddress({
     programAddress: CC_TOKEN_PROGRAM_ADDRESS,
     seeds: [BALANCE_SEED, getAddressEncoder().encode(owner), positionId],
+  });
+}
+
+export function getWrapperAddress(positionId: ReadonlyUint8Array): Promise<ProgramDerivedAddress> {
+  assertIdentifier(positionId, "positionId");
+  return getProgramDerivedAddress({
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    seeds: [WRAPPER_SEED, positionId],
+  });
+}
+
+export function getWrapperMintAddress(
+  positionId: ReadonlyUint8Array,
+): Promise<ProgramDerivedAddress> {
+  assertIdentifier(positionId, "positionId");
+  return getProgramDerivedAddress({
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    seeds: [WRAPPER_MINT_SEED, positionId],
   });
 }
 
