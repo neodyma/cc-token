@@ -9,6 +9,7 @@ import {
 } from "@solana-program/token";
 import {
   address,
+  isSome,
   type Account,
   type Address,
   type FetchAccountConfig,
@@ -17,6 +18,7 @@ import {
 
 import {
   CC_TOKEN_PROGRAM_ADDRESS,
+  CollateralFreezeAuthority,
   fetchMaybeCollateralConfig,
   getCollateralConfigDiscriminatorBytes,
   type CollateralConfig,
@@ -25,7 +27,7 @@ import { getCollateralAddress, getVaultAuthorityAddress } from "../identity.ts";
 import { DefinitionVerificationError } from "./verify.ts";
 
 const STATE_VERSION = 1;
-const COLLATERAL_POLICY_VERSION = 1;
+const COLLATERAL_POLICY_VERSION = 2;
 
 export const TOKEN_2022_PROGRAM_ADDRESS = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
@@ -122,6 +124,15 @@ export async function verifyCollateralAccount(
     throw new DefinitionVerificationError(
       "invalid_identity",
       "collateral mint does not match its config",
+    );
+  }
+  if (
+    config.data.freezeAuthority === CollateralFreezeAuthority.Unfreezable &&
+    isSome(mint.data.freezeAuthority)
+  ) {
+    throw new DefinitionVerificationError(
+      "invalid_identity",
+      "collateral freeze authority does not match its config",
     );
   }
   if (

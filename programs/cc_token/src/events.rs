@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::math::IndexSet;
+use crate::{math::IndexSet, state::CollateralFreezeAuthority};
 
 #[event]
 pub struct ConditionPrepared {
@@ -25,6 +25,7 @@ pub struct CollateralRegistered {
     pub token_program: Pubkey,
     pub vault: Pubkey,
     pub decimals: u8,
+    pub freeze_authority: CollateralFreezeAuthority,
 }
 
 #[event]

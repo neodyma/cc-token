@@ -12,6 +12,8 @@ use crate::{
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Eq, PartialEq)]
 pub struct TransferPositionArgs {
+    pub recipient: Pubkey,
+    pub position_id: [u8; 32],
     pub amount: u64,
 }
 
@@ -40,6 +42,11 @@ pub fn transfer_position<'info>(
     args: TransferPositionArgs,
 ) -> CcTokenResult {
     require!(args.amount > 0, CcTokenError::ZeroAmount);
+    require_keys_eq!(
+        ctx.accounts.recipient.key(),
+        args.recipient,
+        CcTokenError::InvalidTransferDestination
+    );
     require_keys_neq!(
         ctx.accounts.owner.key(),
         ctx.accounts.recipient.key(),
@@ -50,6 +57,10 @@ pub fn transfer_position<'info>(
         CcTokenError::InvalidTransferDestination
     );
     validate_position_identity(&ctx.accounts.position.key(), &ctx.accounts.position)?;
+    require!(
+        ctx.accounts.position.position_id == args.position_id,
+        CcTokenError::PositionMismatch
+    );
     validate_balance(
         &ctx.accounts.source_balance.key(),
         &ctx.accounts.source_balance,

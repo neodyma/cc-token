@@ -53,8 +53,9 @@ pub mod cc_token {
     pub fn split_from_collateral(
         ctx: Context<SplitFromCollateral>,
         args: RootCollateralArgs,
+        accept_issuer_controlled: bool,
     ) -> CcTokenResult {
-        positions::split_from_collateral(ctx, args)
+        positions::split_from_collateral(ctx, args, accept_issuer_controlled)
     }
 
     pub fn merge_to_collateral(

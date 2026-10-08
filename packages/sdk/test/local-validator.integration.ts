@@ -36,6 +36,7 @@ import {
   deriveConditionId,
   derivePositionId,
   CC_TOKEN_PROGRAM_ADDRESS,
+  CollateralFreezeAuthority,
   DefinitionVerificationError,
   fetchCollateralConfig,
   fetchCollectionDefinition,
@@ -181,10 +182,11 @@ test("generated client submits the native lifecycle through v0 and v1", async ()
   const config = await fetchCollateralConfig(rpc, configAddress);
   assert.equal(config.programAddress, CC_TOKEN_PROGRAM_ADDRESS);
   assert.equal(config.data.version, 1);
-  assert.equal(config.data.policyVersion, 1);
+  assert.equal(config.data.policyVersion, 2);
   assert.equal(config.data.mint, mint.address);
   assert.equal(config.data.tokenProgram, TOKEN_PROGRAM_ADDRESS);
   assert.equal(config.data.decimals, 6);
+  assert.equal(config.data.freezeAuthority, CollateralFreezeAuthority.Unfreezable);
   assert.equal(config.data.bump, configBump);
   assert.equal(config.data.vaultAuthorityBump, vaultAuthorityBump);
 

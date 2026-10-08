@@ -51,8 +51,14 @@ pub struct SplitFromCollateral<'info> {
 pub fn split_from_collateral(
     ctx: Context<SplitFromCollateral>,
     args: RootCollateralArgs,
+    accept_issuer_controlled: bool,
 ) -> CcTokenResult {
     validate_collateral(&ctx.accounts)?;
+    require!(
+        ctx.accounts.collateral_config.freeze_authority == CollateralFreezeAuthority::Unfreezable
+            || accept_issuer_controlled,
+        CcTokenError::IssuerControlledCollateralNotAccepted
+    );
     require!(
         ctx.accounts.owner_source.amount >= args.amount,
         CcTokenError::InsufficientCollateral

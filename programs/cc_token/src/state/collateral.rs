@@ -2,6 +2,12 @@ use anchor_lang::prelude::*;
 
 use crate::constants::VAULT_SEED;
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Eq, InitSpace, PartialEq)]
+pub enum CollateralFreezeAuthority {
+    Unfreezable,
+    IssuerControlled,
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct CollateralConfig {
@@ -10,6 +16,7 @@ pub struct CollateralConfig {
     pub mint: Pubkey,
     pub token_program: Pubkey,
     pub decimals: u8,
+    pub freeze_authority: CollateralFreezeAuthority,
     pub vault: Pubkey,
     pub bump: u8,
     pub vault_authority_bump: u8,

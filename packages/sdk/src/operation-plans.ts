@@ -1,4 +1,10 @@
-import type { Address, Instruction, TransactionSigner } from "@solana/kit";
+import { sha256 } from "@noble/hashes/sha2.js";
+import {
+  getAddressEncoder,
+  type Address,
+  type Instruction,
+  type TransactionSigner,
+} from "@solana/kit";
 
 import { getIndexSetUniverse, unionIndexSets } from "./composition/index-set.ts";
 import type { IndexSetWords } from "./identity.ts";
@@ -21,6 +27,7 @@ import {
 
 const DEFAULT_MAX_CHILDREN = 16;
 const MAX_U64 = 0xffff_ffff_ffff_ffffn;
+const PLAN_ID_DOMAIN = new TextEncoder().encode("CC_TOKEN_PLAN_V1");
 
 export type RefinementPlanStep = Readonly<{
   id: string;
@@ -40,6 +47,7 @@ export type RefinementPlan = Readonly<{
 
 export type InstructionPlanStep = Readonly<{
   id: string;
+  planId: string;
   setupInstructions: readonly Instruction[];
   instruction: Instruction;
 }>;
@@ -51,8 +59,14 @@ export type CompleteInstructionPlan = Readonly<{
 
 export type TransactionInstructionPlanStep = Readonly<{
   id: string;
+  planId: string;
   kind: "setup" | "execute";
   instructions: readonly [Instruction];
+}>;
+
+export type CompletedPlanStep = Readonly<{
+  planId: string;
+  stepId: string;
 }>;
 
 export function planCompleteRefinement(input: {
@@ -117,6 +131,7 @@ export async function getCompleteRefinementInstructionPlan(input: {
   outcomeCount: number;
   targetPartition: readonly IndexSetWords[];
   amount: bigint;
+  acceptIssuerControlled?: boolean;
   maxChildren?: number;
 }): Promise<CompleteInstructionPlan> {
   validateAmount(input.amount);
@@ -135,6 +150,7 @@ export async function getCompleteRefinementInstructionPlan(input: {
           outcomeCount: input.outcomeCount,
           partition: step.partition,
           amount: input.amount,
+          acceptIssuerControlled: input.acceptIssuerControlled,
         };
         return {
           id: `${input.direction}:${step.id}`,
@@ -186,7 +202,7 @@ export async function getCompleteRefinementInstructionPlan(input: {
       };
     }),
   );
-  return { id: `${input.direction}:refinement`, steps };
+  return bindInstructionPlan(`${input.direction}:refinement`, steps);
 }
 
 export function planNativeTransferBatches(
@@ -239,13 +255,22 @@ export async function getBatchTransferInstructionPlan(input: {
       }),
     })),
   );
-  return { id: "batch-transfer", steps };
+  return bindInstructionPlan("batch-transfer", steps);
 }
 
-export function getPendingPlanSteps<TStep extends Readonly<{ id: string }>>(
+export function getPendingPlanSteps<TStep extends Readonly<{ id: string; planId: string }>>(
   steps: readonly TStep[],
-  completedStepIds: ReadonlySet<string>,
+  completedSteps: readonly CompletedPlanStep[],
 ): readonly TStep[] {
+  if (steps.length === 0) return [];
+  const planId = steps[0]!.planId;
+  if (steps.some((step) => step.planId !== planId)) {
+    throw new Error("plan steps must share one plan ID");
+  }
+  if (completedSteps.some((step) => step.planId !== planId)) {
+    throw new Error("completed plan steps do not belong to this plan");
+  }
+  const completedStepIds = new Set(completedSteps.map((step) => step.stepId));
   let completedPrefix = 0;
   while (completedPrefix < steps.length && completedStepIds.has(steps[completedPrefix]!.id)) {
     completedPrefix += 1;
@@ -264,11 +289,13 @@ export function flattenInstructionPlan(
   return plan.steps.flatMap((step) => [
     ...step.setupInstructions.map((instruction, index): TransactionInstructionPlanStep => ({
       id: `${step.id}:setup:${index}`,
+      planId: plan.id,
       kind: "setup",
       instructions: [instruction],
     })),
     {
       id: `${step.id}:execute`,
+      planId: plan.id,
       kind: "execute",
       instructions: [step.instruction],
     } satisfies TransactionInstructionPlanStep,
@@ -288,6 +315,82 @@ function copyIndexSet(indexSet: IndexSetWords): IndexSetWords {
 
 function refinementStepId(index: number, partition: readonly IndexSetWords[]): string {
   return `refinement:${index}:${partition.map(bytesKey).join("-")}`;
+}
+
+function bindInstructionPlan(
+  kind: string,
+  steps: readonly Readonly<{
+    setupInstructions: readonly Instruction[];
+    instruction: Instruction;
+  }>[],
+): CompleteInstructionPlan {
+  const planId = `${kind}:${instructionPlanFingerprint(kind, steps)}`;
+  return {
+    id: planId,
+    steps: steps.map((step, index) => ({
+      ...step,
+      id: `${planId}:${index}`,
+      planId,
+    })),
+  };
+}
+
+function instructionPlanFingerprint(
+  kind: string,
+  steps: readonly Readonly<{
+    setupInstructions: readonly Instruction[];
+    instruction: Instruction;
+  }>[],
+): string {
+  const kindBytes = new TextEncoder().encode(kind);
+  const chunks = [
+    PLAN_ID_DOMAIN,
+    encodeLength(kindBytes.length),
+    kindBytes,
+    encodeLength(steps.length),
+  ];
+  for (const step of steps) {
+    const instructions = [...step.setupInstructions, step.instruction];
+    chunks.push(encodeLength(instructions.length));
+    for (const instruction of instructions) chunks.push(encodeInstruction(instruction));
+  }
+  return Array.from(sha256(concatBytes(chunks)), (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+function encodeInstruction(instruction: Instruction): Uint8Array {
+  const accounts = instruction.accounts ?? [];
+  const data = instruction.data ?? new Uint8Array();
+  const chunks: Uint8Array[] = [
+    Uint8Array.from(getAddressEncoder().encode(instruction.programAddress)),
+    encodeLength(accounts.length),
+  ];
+  for (const account of accounts) {
+    chunks.push(
+      Uint8Array.from(getAddressEncoder().encode(account.address)),
+      Uint8Array.of(account.role),
+    );
+  }
+  chunks.push(encodeLength(data.length), Uint8Array.from(data));
+  return concatBytes(chunks);
+}
+
+function encodeLength(value: number): Uint8Array {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff) {
+    throw new RangeError("plan length must fit in u32");
+  }
+  return Uint8Array.of(value, value >>> 8, value >>> 16, value >>> 24);
+}
+
+function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
+  const bytes = new Uint8Array(chunks.reduce((length, chunk) => length + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
 }
 
 function validateAmount(amount: bigint): void {

@@ -30,8 +30,8 @@ use cc_token::{
     },
     math::IndexSet,
     state::{
-        CollateralConfig, CollectionDefinition, Condition, PositionBalance, PositionDefinition,
-        WrapperConfig,
+        CollateralConfig, CollateralFreezeAuthority, CollectionDefinition, Condition,
+        PositionBalance, PositionDefinition, WrapperConfig,
     },
     ID,
 };
@@ -39,7 +39,7 @@ use litesvm::{types::TransactionMetadata, LiteSVM};
 use litesvm_token::{
     spl_token::{
         extension::{transfer_fee::instruction::initialize_transfer_fee_config, ExtensionType},
-        instruction::initialize_mint2,
+        instruction::{initialize_mint2, set_authority, AuthorityType},
         state::Mint,
     },
     CreateAssociatedTokenAccount, CreateMint, FreezeAccount, MintTo, TransferChecked,
@@ -563,6 +563,24 @@ fn split_from_collateral_instruction(
     token_program: Address,
     args: RootCollateralArgs,
 ) -> Instruction {
+    split_from_collateral_instruction_with_acceptance(
+        owner,
+        owner_source,
+        mint,
+        token_program,
+        args,
+        false,
+    )
+}
+
+fn split_from_collateral_instruction_with_acceptance(
+    owner: Address,
+    owner_source: Address,
+    mint: Address,
+    token_program: Address,
+    args: RootCollateralArgs,
+    accept_issuer_controlled: bool,
+) -> Instruction {
     let mut account_metas = accounts::SplitFromCollateral {
         owner,
         owner_source,
@@ -583,7 +601,11 @@ fn split_from_collateral_instruction(
     Instruction {
         program_id: ID,
         accounts: account_metas,
-        data: instruction::SplitFromCollateral { args }.data(),
+        data: instruction::SplitFromCollateral {
+            args,
+            accept_issuer_controlled,
+        }
+        .data(),
     }
 }
 
@@ -725,7 +747,11 @@ fn transfer_position_instruction(
         program_id: ID,
         accounts,
         data: instruction::TransferPosition {
-            args: TransferPositionArgs { amount },
+            args: TransferPositionArgs {
+                recipient,
+                position_id,
+                amount,
+            },
         }
         .data(),
     }
@@ -765,7 +791,11 @@ fn batch_transfer_positions_instruction(
         program_id: ID,
         accounts: account_metas,
         data: instruction::BatchTransferPositions {
-            args: BatchTransferPositionsArgs { amounts },
+            args: BatchTransferPositionsArgs {
+                recipient,
+                position_ids: position_ids.to_vec(),
+                amounts,
+            },
         }
         .data(),
     }
@@ -1044,6 +1074,14 @@ fn collateral_registration_is_idempotent_for_supported_mints() {
         assert_eq!(config.mint, mint);
         assert_eq!(config.token_program, token_program);
         assert_eq!(config.decimals, COLLATERAL_DECIMALS);
+        assert_eq!(
+            config.freeze_authority,
+            if freeze_authority.is_some() {
+                CollateralFreezeAuthority::IssuerControlled
+            } else {
+                CollateralFreezeAuthority::Unfreezable
+            }
+        );
         assert_eq!(config.vault, vault_address);
         assert_eq!(config.bump, config_bump);
         assert_eq!(config.vault_authority_bump, vault_authority_bump);
@@ -1059,12 +1097,34 @@ fn collateral_registration_is_idempotent_for_supported_mints() {
         assert!(context.svm.get_account(&vault_authority).is_none());
 
         let config_before = context.svm.get_account(&config_address).unwrap().data;
+        if freeze_authority.is_some() {
+            context
+                .send(
+                    set_authority(
+                        &token_program,
+                        &mint,
+                        None,
+                        AuthorityType::FreezeAccount,
+                        &payer,
+                        &[],
+                    )
+                    .unwrap(),
+                    TransactionVersion::V0,
+                )
+                .unwrap();
+        }
         let reused = context.send(instruction, TransactionVersion::V0).unwrap();
         assert_within_transaction_limit(&reused);
         assert_eq!(
             context.svm.get_account(&config_address).unwrap().data,
             config_before
         );
+        if freeze_authority.is_some() {
+            assert_eq!(
+                context.collateral_config(mint).freeze_authority,
+                CollateralFreezeAuthority::IssuerControlled
+            );
+        }
 
         println!(
             "register_collateral token_program={token_program} fresh_cu={} reused_cu={}",
@@ -2140,6 +2200,31 @@ fn single_transfers_initialize_recipients_and_preserve_exact_balances() {
         .get_account(&balance_address(failed_recipient, position_id))
         .is_none());
 
+    let redirected_recipient = Keypair::new().pubkey();
+    let mut redirected =
+        transfer_position_instruction(payer, recipient.pubkey(), position_id, 1);
+    redirected.accounts[1] = AccountMeta::new_readonly(redirected_recipient, false);
+    redirected.accounts[5] = AccountMeta::new(
+        balance_address(redirected_recipient, position_id),
+        false,
+    );
+    assert!(context.send(redirected, TransactionVersion::V0).is_err());
+
+    let substituted_position_id = position_ids[1];
+    let mut substituted_position =
+        transfer_position_instruction(payer, recipient.pubkey(), position_id, 1);
+    substituted_position.accounts[2] =
+        AccountMeta::new_readonly(position_address(substituted_position_id), false);
+    substituted_position.accounts[3] =
+        AccountMeta::new(balance_address(payer, substituted_position_id), false);
+    substituted_position.accounts[5] = AccountMeta::new(
+        balance_address(recipient.pubkey(), substituted_position_id),
+        false,
+    );
+    assert!(context
+        .send(substituted_position, TransactionVersion::V0)
+        .is_err());
+
     let metadata = context
         .send(
             transfer_position_instruction(payer, recipient.pubkey(), position_id, 40),
@@ -2420,6 +2505,17 @@ fn invalid_batch_transfers_roll_back_every_entry() {
             ),
             TransactionVersion::V0,
         )
+        .is_err());
+
+    let mut redirected_recipient = batch_transfer_positions_instruction(
+        payer,
+        recipient,
+        &position_ids,
+        vec![1; position_ids.len()],
+    );
+    redirected_recipient.accounts[1] = AccountMeta::new_readonly(missing_recipient, false);
+    assert!(context
+        .send(redirected_recipient, TransactionVersion::V0)
         .is_err());
 
     let second_destination = balance_address(recipient, position_ids[1]);
@@ -3066,7 +3162,7 @@ fn invalid_redemptions_leave_source_and_collateral_unchanged() {
     let (condition, partition, position_ids) = prepare_root_positions(&mut context, mint, 2, payer);
     context
         .send(
-            split_from_collateral_instruction(
+            split_from_collateral_instruction_with_acceptance(
                 payer,
                 owner_account,
                 mint,
@@ -3076,6 +3172,7 @@ fn invalid_redemptions_leave_source_and_collateral_unchanged() {
                     partition: partition.clone(),
                     amount: 20,
                 },
+                true,
             ),
             TransactionVersion::V0,
         )
@@ -3345,7 +3442,7 @@ fn invalid_root_transitions_leave_tokens_and_balances_unchanged() {
 }
 
 #[test]
-fn frozen_token_cpi_rolls_back_root_merge() {
+fn issuer_controlled_collateral_requires_opt_in_and_frozen_merge_rolls_back() {
     let mut context = TestContext::new();
     let payer = context.payer.pubkey();
     let token_program = anchor_spl::token::ID;
@@ -3382,7 +3479,7 @@ fn frozen_token_cpi_rolls_back_root_merge() {
         partition,
         amount: 40,
     };
-    context
+    let rejected = context
         .send(
             split_from_collateral_instruction(
                 payer,
@@ -3390,6 +3487,29 @@ fn frozen_token_cpi_rolls_back_root_merge() {
                 mint,
                 token_program,
                 args.clone(),
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap_err();
+    assert!(rejected
+        .meta
+        .logs
+        .iter()
+        .any(|log| log.contains("explicit acceptance")));
+    assert_eq!(context.token_amount(owner_account), 100);
+    assert!(position_ids
+        .iter()
+        .all(|position_id| context.balance(payer, *position_id).amount == 0));
+
+    context
+        .send(
+            split_from_collateral_instruction_with_acceptance(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                args.clone(),
+                true,
             ),
             TransactionVersion::V0,
         )

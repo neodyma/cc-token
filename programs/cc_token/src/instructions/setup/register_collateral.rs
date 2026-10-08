@@ -46,6 +46,11 @@ pub struct RegisterCollateral<'info> {
 
 pub fn register_collateral(ctx: Context<RegisterCollateral>) -> CcTokenResult {
     validate_mint_policy(&ctx.accounts.mint.to_account_info())?;
+    let freeze_authority = if ctx.accounts.mint.freeze_authority.is_some() {
+        CollateralFreezeAuthority::IssuerControlled
+    } else {
+        CollateralFreezeAuthority::Unfreezable
+    };
 
     let registered = CollateralConfig {
         version: STATE_VERSION,
@@ -53,6 +58,7 @@ pub fn register_collateral(ctx: Context<RegisterCollateral>) -> CcTokenResult {
         mint: ctx.accounts.mint.key(),
         token_program: ctx.accounts.token_program.key(),
         decimals: ctx.accounts.mint.decimals,
+        freeze_authority,
         vault: ctx.accounts.vault.key(),
         bump: ctx.bumps.config,
         vault_authority_bump: ctx.bumps.vault_authority,
@@ -65,17 +71,22 @@ pub fn register_collateral(ctx: Context<RegisterCollateral>) -> CcTokenResult {
             token_program: registered.token_program,
             vault: registered.vault,
             decimals: registered.decimals,
+            freeze_authority: registered.freeze_authority,
         });
         config.set_inner(registered);
         return Ok(());
     }
 
+    let freeze_authority_matches = config.freeze_authority == registered.freeze_authority
+        || (config.freeze_authority == CollateralFreezeAuthority::IssuerControlled
+            && registered.freeze_authority == CollateralFreezeAuthority::Unfreezable);
     require!(
         config.version == registered.version
             && config.policy_version == registered.policy_version
             && config.mint == registered.mint
             && config.token_program == registered.token_program
             && config.decimals == registered.decimals
+            && freeze_authority_matches
             && config.vault == registered.vault
             && config.bump == registered.bump
             && config.vault_authority_bump == registered.vault_authority_bump,

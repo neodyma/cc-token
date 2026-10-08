@@ -39,6 +39,7 @@ export type RootCollateralInput = Readonly<{
   outcomeCount: number;
   partition: readonly IndexSetWords[];
   amount: bigint;
+  acceptIssuerControlled?: boolean;
 }>;
 
 export type RootCollateralSetupInput = Readonly<{
@@ -62,6 +63,7 @@ export async function getSplitRootCollateralInstruction(
     condition: resolved.condition,
     tokenProgram: input.tokenProgram,
     args: resolved.args,
+    acceptIssuerControlled: input.acceptIssuerControlled ?? false,
   });
   return withPositionAccounts(instruction, resolved.positionAccounts);
 }

@@ -60,13 +60,13 @@ Two and eight outputs fit a version-0 transaction with static addresses. Sixteen
 
 Native batch transfer was measured after recipient balances were initialized:
 
-| Positions | Accounts | Instruction data | Static transaction | v0 with lookup table |
-| --------: | -------: | ---------------: | -----------------: | -------------------: |
-|         2 |        8 |               28 |                431 |                  279 |
-|         8 |       26 |               76 |              1,073 |                  363 |
-|        16 |       50 |              140 |              1,930 |                  476 |
+| Positions | Accounts | Instruction data | Static transaction | v0 with lookup table | Compute units |
+| --------: | -------: | ---------------: | -----------------: | -------------------: | ------------: |
+|         2 |        8 |              128 |                532 |                  380 |        22,257 |
+|         8 |       26 |              368 |              1,366 |                  656 |        92,136 |
+|        16 |       50 |              688 |              2,478 |                1,024 |       208,208 |
 
-Two and eight positions fit a static version-0 transaction. Sixteen positions fit version 0 with an address lookup table. Batch transfer is capped at sixteen positions; clients can submit additional complete batches. A single transfer can initialize its recipient balance atomically, including when that PDA was pre-funded with lamports. Batch callers initialize missing recipient balances with ordinary setup instructions before the value-moving transaction.
+Two positions fit a static version-0 transaction. Eight and sixteen positions fit version 0 with an address lookup table. The instruction data commits the recipient and ordered position IDs so lookup-table substitution cannot change the signed transfer intent. Batch transfer is capped at sixteen positions; clients can submit additional complete batches. A single transfer can initialize its recipient balance atomically, including when that PDA was pre-funded with lamports. Batch callers initialize missing recipient balances with ordinary setup instructions before the value-moving transaction.
 
 One-factor residual redemption uses eight accounts and produced a 483-byte static version-0 transaction. Root redemption uses ten accounts and also fits version 0 without a lookup table. The runtime suite removes either factor from the same two-condition position, redeems repeated factors one at a time, exercises zero-paying claims, and checks SPL Token and Token-2022 collateral payouts. The maximum-width case computes the 136-bit product on-chain and returns `u64::MAX - 1`, leaving one registered collateral unit in the vault.
 

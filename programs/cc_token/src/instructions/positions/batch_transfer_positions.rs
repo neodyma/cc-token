@@ -12,6 +12,8 @@ use crate::{
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, Eq, PartialEq)]
 pub struct BatchTransferPositionsArgs {
+    pub recipient: Pubkey,
+    pub position_ids: Vec<[u8; 32]>,
     pub amounts: Vec<u64>,
 }
 
@@ -32,12 +34,18 @@ pub fn batch_transfer_positions(
         CcTokenError::TransferBatchTooLarge
     );
     require!(
-        ctx.remaining_accounts.len() == args.amounts.len() * 3,
+        args.position_ids.len() == args.amounts.len()
+            && ctx.remaining_accounts.len() == args.amounts.len() * 3,
         CcTokenError::InvalidTransferAccounts
     );
 
     let owner = ctx.accounts.owner.key();
     let recipient = ctx.accounts.recipient.key();
+    require_keys_eq!(
+        recipient,
+        args.recipient,
+        CcTokenError::InvalidTransferDestination
+    );
     require_keys_neq!(owner, recipient, CcTokenError::SelfTransfer);
     let mut position_ids = Vec::with_capacity(args.amounts.len());
     let mut balance_addresses = Vec::with_capacity(args.amounts.len() * 2);
@@ -51,6 +59,10 @@ pub fn batch_transfer_positions(
 
         let position = deserialize_position(position_account)?;
         validate_position_identity(&position_account.key(), &position)?;
+        require!(
+            position.position_id == args.position_ids[index],
+            CcTokenError::PositionMismatch
+        );
         require!(
             !position_ids.contains(&position.position_id),
             CcTokenError::DuplicateTransferEntry

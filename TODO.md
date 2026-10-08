@@ -39,6 +39,7 @@
 - [x] `register_collection`
 - [x] Collateral mint registration
 - [x] Collateral policy and Token/Token-2022 validation
+- [x] Freeze-authority classification and deposit opt-in
 - [x] Canonical collateral vault creation
 - [x] `PositionDefinition`
 - [x] `PositionBalance`
@@ -119,7 +120,9 @@
 - [x] Explicit repeated-factor construction
 - [x] Split, merge, transfer, resolution, redemption and wrapper builders
 - [x] Transaction capacity estimation
+- [x] Lookup-table verification at signing
 - [x] Large-operation planning into complete resumable steps
+- [x] Plan-scoped execution checkpoints and reconciliation
 - [x] Simulation, submission, confirmation and refetch behavior
 - [ ] Stable public SDK API
 

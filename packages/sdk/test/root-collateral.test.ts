@@ -11,6 +11,7 @@ import {
   getPositionAddress,
   getPositionBalanceAddress,
   getRootCollateralSetupInstructions,
+  getSplitFromCollateralInstructionDataDecoder,
   getSplitRootCollateralInstruction,
   ROOT_COLLECTION_ID,
   TOKEN_2022_PROGRAM_ADDRESS,
@@ -74,6 +75,18 @@ test("builds root collateral instructions with ordered position pairs", async ()
     partition,
   });
   assert.equal(setup.length, 6);
+
+  const decoder = getSplitFromCollateralInstructionDataDecoder();
+  assert.equal(
+    decoder.decode((await getSplitRootCollateralInstruction(input)).data!).acceptIssuerControlled,
+    false,
+  );
+  assert.equal(
+    decoder.decode(
+      (await getSplitRootCollateralInstruction({ ...input, acceptIssuerControlled: true })).data!,
+    ).acceptIssuerControlled,
+    true,
+  );
 });
 
 test("rejects partial partitions and invalid amounts before building", async () => {

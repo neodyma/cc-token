@@ -9,6 +9,7 @@ import {
   getBatchTransferSetupInstructions,
   getPositionAddress,
   getPositionBalanceAddress,
+  getTransferPositionInstructionDataDecoder,
   getTransferNativePositionInstruction,
   normalizeBatchTransfers,
 } from "../src/index.ts";
@@ -41,6 +42,10 @@ test("builds a single transfer with canonical source and destination balances", 
   );
   assert.equal(instruction.accounts?.[3]?.role, AccountRole.WRITABLE);
   assert.equal(instruction.accounts?.[5]?.role, AccountRole.WRITABLE);
+  const data = getTransferPositionInstructionDataDecoder().decode(instruction.data!);
+  assert.equal(data.recipient, recipient);
+  assert.deepEqual(data.positionId, id);
+  assert.equal(data.amount, 25n);
 });
 
 test("rejects self-transfers", async () => {
@@ -92,6 +97,11 @@ test("consolidates duplicate batch entries and preserves first-seen order", asyn
   });
   assert.equal(instruction.accounts?.length, 8);
   const data = getBatchTransferPositionsInstructionDataDecoder().decode(instruction.data!);
+  assert.equal(data.recipient, recipient);
+  assert.deepEqual(
+    data.positionIds,
+    normalized.map(({ positionId }) => positionId),
+  );
   assert.deepEqual(data.amounts, [5n, 4n]);
   for (let index = 0; index < normalized.length; index += 1) {
     const id = normalized[index]!.positionId;

@@ -66,20 +66,46 @@ test("builds split and reverse merge plans from the same deterministic steps", a
   assert(split.steps.every((step) => step.setupInstructions.length > 0));
   assert.equal(merge.steps.length, 2);
   assert(merge.steps.every((step) => step.setupInstructions.length === 0));
-  assert.match(split.steps[0]!.id, /^split:refinement:0:/);
-  assert.match(merge.steps[1]!.id, /^merge:refinement:0:/);
+  assert.match(split.id, /^split:refinement:[0-9a-f]{64}$/);
+  assert.match(merge.id, /^merge:refinement:[0-9a-f]{64}$/);
+  assert.notEqual(split.id, merge.id);
+  assert(split.steps.every((step) => step.planId === split.id));
+  assert(merge.steps.every((step) => step.planId === merge.id));
 
   const flattened = flattenInstructionPlan(split);
   assert.equal(flattened.at(-1)!.kind, "execute");
   assert.equal(flattened.filter((step) => step.kind === "execute").length, 2);
   assert.deepEqual(
-    getPendingPlanSteps(flattened, new Set(flattened.slice(0, 3).map((step) => step.id))),
+    getPendingPlanSteps(
+      flattened,
+      flattened.slice(0, 3).map((step) => ({ planId: step.planId, stepId: step.id })),
+    ),
     flattened.slice(3),
   );
   assert.throws(
-    () => getPendingPlanSteps(flattened, new Set([flattened[1]!.id])),
+    () =>
+      getPendingPlanSteps(flattened, [{ planId: flattened[1]!.planId, stepId: flattened[1]!.id }]),
     /contiguous prefix/,
   );
+  assert.throws(
+    () => getPendingPlanSteps(flattened, [{ planId: merge.id, stepId: flattened[0]!.id }]),
+    /do not belong/,
+  );
+
+  const changedAmount = await getCompleteRefinementInstructionPlan({
+    ...base,
+    direction: "split",
+    amount: 51n,
+  });
+  const acceptedIssuerControl = await getCompleteRefinementInstructionPlan({
+    ...base,
+    direction: "split",
+    acceptIssuerControlled: true,
+  });
+  const repeated = await getCompleteRefinementInstructionPlan({ ...base, direction: "split" });
+  assert.notEqual(changedAmount.id, split.id);
+  assert.notEqual(acceptedIssuerControl.id, split.id);
+  assert.equal(repeated.id, split.id);
 });
 
 test("consolidates and chunks large native transfers into complete batches", async () => {
@@ -107,6 +133,23 @@ test("consolidates and chunks large native transfers into complete batches", asy
     plan.steps.map((step) => step.setupInstructions.length),
     [16, 16, 1],
   );
+
+  const changedRecipient = await getBatchTransferInstructionPlan({
+    payer: owner,
+    owner,
+    recipient: mint,
+    transfers,
+  });
+  const changedAmount = await getBatchTransferInstructionPlan({
+    payer: owner,
+    owner,
+    recipient,
+    transfers: transfers.map((transfer, index) =>
+      index === 0 ? { ...transfer, amount: transfer.amount + 1n } : transfer,
+    ),
+  });
+  assert.notEqual(changedRecipient.id, plan.id);
+  assert.notEqual(changedAmount.id, plan.id);
 });
 
 function singleton(outcome: number): IndexSetWords {

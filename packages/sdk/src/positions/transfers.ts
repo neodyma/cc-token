@@ -57,6 +57,8 @@ export async function getTransferNativePositionInstruction(
       recipient: input.recipient,
       position,
       sourceBalance,
+      recipientArg: input.recipient,
+      positionId: input.positionId,
       amount: input.amount,
     }),
     [{ address: destinationBalance, role: AccountRole.WRITABLE }],
@@ -86,6 +88,8 @@ export async function getBatchTransferNativePositionsInstruction(
     getGeneratedBatchTransferPositionsInstruction({
       owner: input.owner,
       recipient: input.recipient,
+      recipientArg: input.recipient,
+      positionIds: transfers.map(({ positionId }) => positionId),
       amounts: transfers.map(({ amount }) => amount),
     }),
     transferAccounts.flat(),

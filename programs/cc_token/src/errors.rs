@@ -48,6 +48,8 @@ pub enum CcTokenError {
     UnsupportedCollateralExtension,
     #[msg("Collateral account does not match its registered definition")]
     CollateralMismatch,
+    #[msg("Issuer-controlled collateral requires explicit acceptance")]
+    IssuerControlledCollateralNotAccepted,
     #[msg("Position ID does not match its definition")]
     InvalidPositionId,
     #[msg("Position account does not match its registered definition")]

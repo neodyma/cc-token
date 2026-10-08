@@ -2,14 +2,18 @@ import {
   appendTransactionMessageInstructions,
   compressTransactionMessageUsingAddressLookupTables,
   createTransactionMessage,
+  fetchAddressesForLookupTables,
   setTransactionMessageComputeUnitLimit,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   setTransactionMessageLoadedAccountsDataSizeLimit,
   signTransactionMessageWithSigners,
-  type AddressesByLookupTableAddress,
+  type Address,
   type Blockhash,
+  type FetchAccountsConfig,
+  type GetMultipleAccountsApi,
   type Instruction,
+  type Rpc,
   type TransactionSigner,
 } from "@solana/kit";
 
@@ -23,6 +27,12 @@ export type CcTokenTransactionVersion = 0 | 1;
 export type CcTokenBlockhashLifetime = Readonly<{
   blockhash: Blockhash;
   lastValidBlockHeight: bigint;
+}>;
+
+export type AddressLookupTableSource = Readonly<{
+  addresses: readonly Address[];
+  rpc: Rpc<GetMultipleAccountsApi>;
+  config?: FetchAccountsConfig;
 }>;
 
 export function selectTransactionVersion(
@@ -39,7 +49,7 @@ export async function buildCcTokenTransaction(input: {
   feePayer: TransactionSigner;
   instructions: readonly Instruction[];
   lifetime: CcTokenBlockhashLifetime;
-  lookupTables?: AddressesByLookupTableAddress;
+  lookupTables?: AddressLookupTableSource;
   computeUnitLimit?: number;
   loadedAccountsDataSizeLimit?: number;
 }) {
@@ -48,8 +58,13 @@ export async function buildCcTokenTransaction(input: {
       input.instructions,
       setTransactionMessageFeePayerSigner(input.feePayer, createTransactionMessage({ version: 0 })),
     );
-    if (input.lookupTables && Object.keys(input.lookupTables).length > 0) {
-      message = compressTransactionMessageUsingAddressLookupTables(message, input.lookupTables);
+    if (input.lookupTables && input.lookupTables.addresses.length > 0) {
+      const addresses = await fetchAddressesForLookupTables(
+        [...input.lookupTables.addresses],
+        input.lookupTables.rpc,
+        input.lookupTables.config,
+      );
+      message = compressTransactionMessageUsingAddressLookupTables(message, addresses);
     }
     return signTransactionMessageWithSigners(
       setTransactionMessageLifetimeUsingBlockhash(input.lifetime, message),

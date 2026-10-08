@@ -21,7 +21,12 @@ the caller explicitly prefers v1. The v1 estimate includes the configured comput
 account-data limits.
 
 Capacity estimation only proves that a message can be encoded within its version's size limit.
-Simulation remains responsible for runtime compute, account-data and program validation.
+The estimator accepts a supplied lookup-table map because it does not sign. The transaction builder
+accepts table addresses and an RPC instead, then fetches their ordered contents immediately before
+compilation and signing. Use the same trusted cluster RPC for lookup tables, blockhashes and
+submission. Simulation remains responsible for runtime compute, account-data and program
+validation. Transfer instruction data also commits the recipient and ordered position IDs; the
+program rejects resolved accounts that do not match that signed intent.
 
 ## Large operations
 
@@ -30,17 +35,28 @@ produces up to 15 requested subsets and one remainder. Later steps split that re
 target partition exists. Merges execute the same transitions in reverse order.
 
 Batch transfers are consolidated by position and divided into instructions of at most 16 positions.
-Every setup instruction and value transition receives a deterministic step ID. Completed IDs must
-form a prefix of the plan before execution resumes.
+Every executable plan has a versioned fingerprint over its ordered instructions, program addresses,
+account roles and data. Step IDs are namespaced by that plan ID. Completed records include both IDs,
+must belong to the current plan and must form a prefix before execution resumes.
 
 Setup instructions are idempotent and execute separately from value transitions. Each value
 transition is complete and preserves protocol accounting on its own.
 
 ## Execution
 
-`executeConfirmedPlan` builds, simulates, submits, confirms and refetches after each step. A failed
-simulation is never submitted. Errors identify the phase and step, retain prior receipts and include
-simulation logs or a submitted signature when available.
+`executeConfirmedPlan` loads and reconciles any durable checkpoint before it can build a step. It
+then builds, signs and simulates a fresh step and records the signed transaction and its signature
+before submission. It records submitted, confirmed and refetched states in order. A failed
+simulation is never submitted. Errors identify the plan, phase and step, retain prior receipts and
+include the latest checkpoint.
 
-A confirmation or refetch error may follow a successful submission. Callers should check the
-signature and current state before resuming rather than submitting that step again blindly.
+`reconcileExecutionCheckpoint` checks an interrupted step by its original signature. An unknown
+signature remains pending and is not rebuilt. A confirmed transaction resumes at refetch. A new
+transaction may be built only after the original signature is definitively failed or expired. The
+application chooses the durable checkpoint store.
+
+The program deliberately allows an owner to authorize the same split or transfer more than once.
+Those are distinct valid operations, so the contract cannot classify a newly signed repetition as
+accidental without adding operation-nonce state. Resubmitting the same signed transaction preserves
+its signature; the checkpoint rule prevents the client from replacing an ambiguous submission with
+a separately signed transaction.
