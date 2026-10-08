@@ -109,7 +109,7 @@ export const SCENARIOS: readonly Scenario[] = [
     key: "price-range",
     title: "Price range",
     summary:
-      "One question about the SOL price, split into eight buckets. Any group of buckets is a single claim, so a market maker can sell a $125 to $200 range without anyone creating a new market for it.",
+      "One question about the SOL price, split into eight buckets. Any group of buckets is a single claim, so a market maker can sell a $125 to $200 range without anyone creating a new oracle question for it.",
     collateral: USDC,
     conditions: [
       defineCondition(
@@ -200,7 +200,7 @@ export const SCENARIOS: readonly Scenario[] = [
     key: "tournament",
     title: "Tournament winner",
     summary:
-      "Eight teams, one winner. Early on, a broad claim on half the field is easy to price and trade. As the tournament narrows, the same shares can be cut into smaller groups and finally single teams, without anyone opening a new market.",
+      "Eight teams, one winner. Early on, a broad claim on half the field is easy to price and trade. As the tournament narrows, the same shares can be cut into smaller groups and finally single teams, without anyone asking a new oracle question.",
     collateral: USDC,
     conditions: [
       defineCondition("winner", "Tournament winner", "Which team wins the final", [
@@ -225,7 +225,7 @@ export const SCENARIOS: readonly Scenario[] = [
     key: "uptime-bond",
     title: "Uptime bond",
     summary:
-      "An RPC provider posts a bond that pays its customer the square of the monthly downtime fraction, so the payout grows faster the worse the outage. The same selection is applied twice on purpose.",
+      "An RPC provider posts a bond that pays its customer the square of the monthly downtime fraction, so the payout grows faster the worse the outage. The same selection is applied twice on purpose. The simulated market assumes one winning result, so its prices do not apply here.",
     collateral: USDC,
     conditions: [
       defineCondition(
@@ -451,6 +451,9 @@ export function mintedSet(factors: readonly ConditionClause[]): readonly MintedC
   return [...complements, { factors, isTarget: true }];
 }
 
+// Amounts and payout weights are u64 in the program.
+export const MAX_U64 = (1n << 64n) - 1n;
+
 export function parseTokenAmount(text: string, decimals: number): bigint {
   const match = /^(\d+)(?:\.(\d*))?$/.exec(text.trim());
   if (!match) throw new RangeError(`"${text}" is not an amount`);
@@ -458,13 +461,24 @@ export function parseTokenAmount(text: string, decimals: number): bigint {
   if (fraction.length > decimals) {
     throw new RangeError(`amounts have at most ${decimals} decimal places`);
   }
-  return BigInt(match[1]! + fraction.padEnd(decimals, "0"));
+  const amount = BigInt(match[1]! + fraction.padEnd(decimals, "0"));
+  if (amount > MAX_U64) throw new RangeError("that amount is larger than the program can hold");
+  return amount;
+}
+
+export function parsePayoutWeight(text: string): bigint {
+  const digits = text.trim();
+  if (!/^\d+$/.test(digits)) throw new RangeError("weights must be whole numbers");
+  const weight = BigInt(digits);
+  if (weight > MAX_U64) throw new RangeError("that weight is larger than the program accepts");
+  return weight;
 }
 
 export function formatTokenAmount(amount: bigint, decimals: number): string {
   const digits = amount.toString().padStart(decimals + 1, "0");
-  const fraction = digits.slice(-decimals).replace(/0+$/, "");
-  const whole = digits.slice(0, -decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const split = digits.length - decimals;
+  const fraction = digits.slice(split).replace(/0+$/, "");
+  const whole = digits.slice(0, split).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
@@ -488,12 +502,15 @@ export function adjustBalance(
   if (factors.length === 0) {
     const collateral = portfolio.collateral + change;
     if (collateral < 0n) throw new RangeError("not enough unlocked collateral");
+    if (collateral > MAX_U64)
+      throw new RangeError("that balance is larger than the program can hold");
     return { ...portfolio, collateral };
   }
   const key = holdingKey(factors);
   const existing = portfolio.holdings.find((holding) => holding.key === key);
   const amount = (existing?.amount ?? 0n) + change;
   if (amount < 0n) throw new RangeError("not enough shares of that claim");
+  if (amount > MAX_U64) throw new RangeError("that balance is larger than the program can hold");
   const holdings = existing
     ? portfolio.holdings.map((holding) => (holding.key === key ? { ...holding, amount } : holding))
     : [...portfolio.holdings, { key, factors, amount }];

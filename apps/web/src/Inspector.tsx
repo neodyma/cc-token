@@ -3,7 +3,15 @@ import { useState, type ReactNode } from "react";
 
 import { Badge, Chip, Identifier } from "./components.tsx";
 import { balanceOf, COLLATERAL_KEY, redemption, type Ledger, type PositionNode } from "./ledger.ts";
-import { buy, claimAtoms, outcomePrices, price, quote, type Market } from "./market.ts";
+import {
+  buy,
+  claimAtoms,
+  outcomePrices,
+  price,
+  quote,
+  toMarketAmount,
+  type Market,
+} from "./market.ts";
 import {
   attempt,
   constructionPath,
@@ -15,6 +23,7 @@ import {
   indexSetFromOutcomes,
   mergeOptions,
   outcomesInIndexSet,
+  parsePayoutWeight,
   parseTokenAmount,
   subtractIndexSet,
   toHex,
@@ -329,10 +338,7 @@ export function ConditionInspector(
 
   function report() {
     const numerators = attempt(() => {
-      const values = weights.map((weight) => {
-        if (!/^\d+$/.test(weight.trim())) throw new RangeError("weights must be whole numbers");
-        return BigInt(weight.trim());
-      });
+      const values = weights.map(parsePayoutWeight);
       if (values.every((value) => value === 0n)) {
         throw new RangeError("at least one result needs a weight");
       }
@@ -377,7 +383,7 @@ export function ConditionInspector(
         <p className="mt-2 text-xs text-muted">
           {reported
             ? "The share of each result in the payout. On-chain a reported result is final; here you can reset it."
-            : "The chance the simulated market gives each result."}
+            : "The simulated market's price for each result, which is its chance of being the single winner."}
         </p>
         {reported && (
           <button
@@ -684,15 +690,14 @@ function TradeTicket(props: {
   const size = attempt(() => {
     const value = parseTokenAmount(text, decimals);
     if (value <= 0n) throw new RangeError("enter a number of shares");
-    return value;
+    return { shares: value, count: toMarketAmount(value, decimals) };
   });
 
   const mode = (active: boolean) =>
     `flex-1 border-b-2 pb-1.5 text-sm font-medium ${active ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"}`;
   let summary: ReactNode = <Badge tone="bad">{size.ok ? "" : size.error}</Badge>;
   if (size.ok) {
-    const shares = size.value;
-    const count = toNumber(shares, decimals);
+    const { shares, count } = size.value;
     const unit = 10 ** decimals;
     // Round against the trader, as a venue would.
     const amount = selling

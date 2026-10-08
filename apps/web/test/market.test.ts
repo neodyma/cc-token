@@ -9,6 +9,7 @@ import {
   outcomePrices,
   price,
   quote,
+  toMarketAmount,
 } from "../src/market.ts";
 import { compose, SCENARIOS } from "../src/scenario.ts";
 
@@ -81,4 +82,10 @@ test("adding a question keeps existing prices and starts it at even odds", () =>
   assert.equal(extended.atoms.length, 32);
   near(outcomePrices(extended, 0)[3]!, outcomePrices(traded, 0)[3]!);
   near(outcomePrices(extended, 1)[2]!, 0.25);
+});
+
+test("amounts too large for floating point are refused, not rounded", () => {
+  assert.equal(toMarketAmount(1_500_000n, 6), 1.5);
+  assert.equal(toMarketAmount(BigInt(Number.MAX_SAFE_INTEGER), 0), Number.MAX_SAFE_INTEGER);
+  assert.throws(() => toMarketAmount(BigInt(Number.MAX_SAFE_INTEGER) + 1n, 0), /too large/);
 });

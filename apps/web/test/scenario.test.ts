@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  adjustBalance,
   compose,
   defineCondition,
   describeSubset,
   formatTokenAmount,
+  MAX_U64,
+  parsePayoutWeight,
   indexSetFromOutcomes,
   mergeOptions,
   mergePositions,
@@ -159,6 +162,20 @@ test("token amounts parse and format without losing precision", () => {
   assert.equal(formatTokenAmount(12_345_678_500_000n, 6), "12,345,678.5");
   assert.throws(() => parseTokenAmount("1.0000001", 6));
   assert.throws(() => parseTokenAmount("-1", 6));
+  assert.equal(formatTokenAmount(123n, 0), "123");
+  assert.equal(formatTokenAmount(1_234_567n, 0), "1,234,567");
+  assert.equal(parseTokenAmount("42", 0), 42n);
+});
+
+test("amounts and payout weights stay within the program's u64", () => {
+  assert.equal(parseTokenAmount("18446744073709551615", 0), MAX_U64);
+  assert.throws(() => parseTokenAmount("18446744073709551616", 0), /larger than the program/);
+  assert.throws(() => parseTokenAmount("18446744073710", 6), /larger than the program/);
+  assert.equal(parsePayoutWeight(" 3 "), 3n);
+  assert.equal(parsePayoutWeight("18446744073709551615"), MAX_U64);
+  assert.throws(() => parsePayoutWeight("18446744073709551616"), /larger than the program/);
+  assert.throws(() => parsePayoutWeight("1.5"), /whole numbers/);
+  assert.throws(() => adjustBalance({ collateral: MAX_U64, holdings: [] }, [], 1n));
 });
 
 test("every scenario composes and its minted set returns the deposit", () => {

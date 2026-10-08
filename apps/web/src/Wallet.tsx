@@ -241,6 +241,7 @@ function Balance(props: { address: Address }) {
 export function useProgramDeployed(): Loaded<boolean> {
   return useLoaded(
     async () =>
+      // Any account can exist at the address; only an executable one is the program.
       (
         await client.rpc
           .getAccountInfo(CC_TOKEN_PROGRAM_ADDRESS, {
@@ -248,7 +249,7 @@ export function useProgramDeployed(): Loaded<boolean> {
             dataSlice: { offset: 0, length: 0 },
           })
           .send()
-      ).value !== null,
+      ).value?.executable === true,
     CC_TOKEN_PROGRAM_ADDRESS,
   );
 }

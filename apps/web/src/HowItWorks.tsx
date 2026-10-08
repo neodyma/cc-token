@@ -162,7 +162,8 @@ export function HowItWorks() {
             </Box>
             <Box top="3. Redeem" tone="accent">
               Once the result is known, each share pays between 0 and 1 token. All shares together
-              pay back exactly what was locked.
+              pay back what was locked, apart from rounding of less than one smallest unit per
+              redemption.
             </Box>
           </div>
           <p>
@@ -331,8 +332,8 @@ export function HowItWorks() {
               can back every range anyone wants to trade.
             </Box>
             <Box top="Refine later">
-              A broad claim can be cut into narrower ones after it exists, without opening or
-              resolving a new market for each piece.
+              A broad claim can be cut into narrower ones after it exists, without a new oracle
+              question for each piece. A trading venue may still have to list the new pieces.
             </Box>
             <Box top="One asset, any route">
               The same combination of questions is always the same asset, however it was built, so
@@ -433,8 +434,9 @@ export function HowItWorks() {
           </Question>
           <Question ask="Where do prices come from?">
             From wherever claims are traded. Because a full set is always worth its collateral, the
-            prices of the claims in a set should add up to 1, and a claim priced at 0.30 is the
-            market saying it has roughly a 30% chance of paying in full.
+            prices of the claims in a set should add up to 1. A claim priced at 0.30 is the market
+            expecting it to pay 0.30 per share on average; for an all-or-nothing claim that is
+            roughly a 30% chance of paying in full.
           </Question>
           <Question ask="Do I have to wait for the result to get my tokens back?">
             Not if you hold a full set. Claims that together cover every result can be merged back

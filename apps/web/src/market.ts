@@ -12,6 +12,14 @@ export type Market = Readonly<{
   sold: readonly number[];
 }>;
 
+// Token amounts reach the market as floating point, which is exact only up to 2^53 base units.
+export function toMarketAmount(amount: bigint, decimals: number): number {
+  if (amount > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new RangeError("that amount is too large for the simulated market");
+  }
+  return Number(amount) / 10 ** decimals;
+}
+
 export function openMarket(
   conditions: readonly DemoCondition[],
   odds: Readonly<Record<string, readonly number[]>>,
@@ -80,7 +88,8 @@ function atomPrices(market: Market): number[] {
   return weights.map((weight) => weight / total);
 }
 
-// The price of one share, which is also the market's probability that the claim pays.
+// The price of one share. Because this market assumes one winner per question, it is also the
+// market's probability that the claim pays.
 export function price(market: Market, members: readonly boolean[]): number {
   return atomPrices(market).reduce((sum, value, index) => sum + (members[index] ? value : 0), 0);
 }
