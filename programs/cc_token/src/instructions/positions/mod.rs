@@ -12,7 +12,9 @@ pub use batch_transfer_positions::*;
 pub use merge_positions::*;
 pub use merge_to_collateral::*;
 pub use native_position::NativePositionArgs;
-pub(crate) use position_balance::{validate_balance, validate_position};
+pub(crate) use position_balance::{
+    validate_balance, validate_position, validate_position_identity,
+};
 pub use root_collateral::RootCollateralArgs;
 pub use split_from_collateral::*;
 pub use split_position::*;

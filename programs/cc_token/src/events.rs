@@ -127,3 +127,26 @@ pub struct PayoutsReported {
     pub outcome_count: u16,
     pub payout_denominator: u128,
 }
+
+#[event]
+pub struct WrapperInitialized {
+    pub position_id: [u8; 32],
+    pub mint: Pubkey,
+    pub decimals: u8,
+}
+
+#[event]
+pub struct PositionWrapped {
+    pub owner: Pubkey,
+    pub position_id: [u8; 32],
+    pub mint: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct PositionUnwrapped {
+    pub owner: Pubkey,
+    pub position_id: [u8; 32],
+    pub mint: Pubkey,
+    pub amount: u64,
+}

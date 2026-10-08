@@ -100,4 +100,8 @@ pub enum CcTokenError {
     IncompletePayoutReport,
     #[msg("Payout report does not match its condition")]
     PayoutReportMismatch,
+    #[msg("Wrapper configuration does not match its position")]
+    WrapperMismatch,
+    #[msg("Wrapper mint is not the canonical mint for its position")]
+    WrapperMintMismatch,
 }
