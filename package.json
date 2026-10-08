@@ -9,7 +9,7 @@
     "build": "node scripts/build.mjs",
     "check:sbpf": "node scripts/check-sbpf.mjs",
     "generate:client": "codama run js",
-    "test": "pnpm build && pnpm test:rust && pnpm test:sdk && pnpm test:litesvm && pnpm test:integration",
+    "test": "pnpm build && pnpm generate:client && pnpm test:rust && pnpm test:sdk && pnpm test:litesvm && pnpm test:integration",
     "test:rust": "cargo test --workspace --locked",
     "test:sdk": "pnpm --filter @cc-token/sdk test",
     "test:litesvm": "node scripts/test-litesvm.mjs",

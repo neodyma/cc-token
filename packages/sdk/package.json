@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",
+    "@solana-program/token": "0.17.0",
     "@solana/kit": "8.4.0"
   },
   "devDependencies": {

@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  appendTransactionMessageInstruction,
+  appendTransactionMessageInstructions,
   assertIsTransactionWithBlockhashLifetime,
+  createClientWithGetMinimumBalanceFromRpc,
   createSolanaRpc,
   createSolanaRpcSubscriptions,
   createTransactionMessage,
@@ -19,17 +20,26 @@ import {
   type Address,
   type Instruction,
 } from "@solana/kit";
+import {
+  fetchToken,
+  getCreateMintInstructionPlan,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
 
 import {
   deriveCollectionId,
   deriveConditionId,
+  CC_TOKEN_PROGRAM_ADDRESS,
   DefinitionVerificationError,
+  fetchCollateralConfig,
   fetchCollectionDefinition,
   fetchCondition,
   fetchMaybePayoutReport,
   fetchPayoutReport,
   fetchVerifiedCollection,
   fetchVerifiedCondition,
+  findConfigPda,
+  findVaultAuthorityPda,
   getAppendPayoutReportInstruction,
   getCollectionAddress,
   getConditionAddress,
@@ -37,6 +47,7 @@ import {
   getInitializePayoutReportInstruction,
   getPayoutReportAddress,
   getPrepareConditionInstruction,
+  getRegisterCollateralInstructionAsync,
   getRegisterCollectionInstruction,
   getReportPayoutsInstruction,
   planPayoutReport,
@@ -58,13 +69,21 @@ async function sendInstruction(
   instruction: Instruction,
   version: CcTokenTransactionVersion,
 ): Promise<void> {
+  await sendInstructions(payer, [instruction], version);
+}
+
+async function sendInstructions(
+  payer: Awaited<ReturnType<typeof generateKeyPairSigner>>,
+  instructions: readonly Instruction[],
+  version: CcTokenTransactionVersion,
+): Promise<void> {
   const latestBlockhash = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
   if (version === 0) {
     const message = pipe(
       createTransactionMessage({ version: 0 }),
       (value) => setTransactionMessageFeePayerSigner(payer, value),
       (value) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash.value, value),
-      (value) => appendTransactionMessageInstruction(instruction, value),
+      (value) => appendTransactionMessageInstructions(instructions, value),
     );
     const transaction = await signTransactionMessageWithSigners(message);
     assertIsTransactionWithBlockhashLifetime(transaction);
@@ -76,7 +95,7 @@ async function sendInstruction(
     createTransactionMessage({ version: 1 }),
     (value) => setTransactionMessageFeePayerSigner(payer, value),
     (value) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash.value, value),
-    (value) => appendTransactionMessageInstruction(instruction, value),
+    (value) => appendTransactionMessageInstructions(instructions, value),
     (value) => setTransactionMessageComputeUnitLimit(1_400_000, value),
     (value) => setTransactionMessageLoadedAccountsDataSizeLimit(64 * 1024 * 1024, value),
   );
@@ -103,6 +122,48 @@ test("generated client submits identity and resolution instructions through v0 a
   const v1Capable = selectTransactionVersion(new Set([0, 1]));
   assert.equal(v0Only, 0);
   assert.equal(v1Capable, 1);
+
+  const mint = await generateKeyPairSigner();
+  const mintPlan = await getCreateMintInstructionPlan(
+    createClientWithGetMinimumBalanceFromRpc(rpc),
+    {
+      payer,
+      newMint: mint,
+      decimals: 6,
+      mintAuthority: payer.address,
+      freezeAuthority: null,
+    },
+  );
+  assert.equal(mintPlan.kind, "sequential");
+  const createMintInstructions = mintPlan.plans.map((plan) => {
+    assert.equal(plan.kind, "single");
+    if (plan.kind !== "single") throw new Error("expected single-instruction mint plan steps");
+    return plan.instruction;
+  });
+  await sendInstructions(payer, createMintInstructions, v0Only);
+
+  const [configAddress, configBump] = await findConfigPda({ mint: mint.address });
+  const [vaultAuthority, vaultAuthorityBump] = await findVaultAuthorityPda({
+    mint: mint.address,
+  });
+  const registerCollateral = await getRegisterCollateralInstructionAsync({ payer, mint });
+  await sendInstruction(payer, registerCollateral, v0Only);
+
+  const config = await fetchCollateralConfig(rpc, configAddress);
+  assert.equal(config.programAddress, CC_TOKEN_PROGRAM_ADDRESS);
+  assert.equal(config.data.version, 1);
+  assert.equal(config.data.policyVersion, 1);
+  assert.equal(config.data.mint, mint.address);
+  assert.equal(config.data.tokenProgram, TOKEN_PROGRAM_ADDRESS);
+  assert.equal(config.data.decimals, 6);
+  assert.equal(config.data.bump, configBump);
+  assert.equal(config.data.vaultAuthorityBump, vaultAuthorityBump);
+
+  const vault = await fetchToken(rpc, config.data.vault);
+  assert.equal(vault.programAddress, TOKEN_PROGRAM_ADDRESS);
+  assert.equal(vault.data.mint, mint.address);
+  assert.equal(vault.data.owner, vaultAuthority);
+  assert.equal(vault.data.amount, 0n);
 
   const questionId = new Uint8Array(32).fill(17);
   const conditionId = deriveConditionId(payer.address, questionId, 8);
