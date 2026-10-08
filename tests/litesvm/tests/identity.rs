@@ -18,7 +18,10 @@ use cc_token::{
     instruction,
     instructions::{
         definitions::{RegisterCollectionArgs, RegisterPositionArgs},
-        positions::{NativePositionArgs, RootCollateralArgs},
+        positions::{
+            BatchTransferPositionsArgs, NativePositionArgs, RootCollateralArgs,
+            TransferPositionArgs,
+        },
         settlement::ReportPayoutsArgs,
         setup::PrepareConditionArgs,
     },
@@ -597,6 +600,74 @@ fn merge_positions_instruction(
         program_id: ID,
         accounts: account_metas,
         data: instruction::MergePositions { args }.data(),
+    }
+}
+
+fn transfer_position_instruction(
+    owner: Address,
+    recipient: Address,
+    position_id: [u8; 32],
+    amount: u64,
+) -> Instruction {
+    let mut accounts = accounts::TransferPosition {
+        owner,
+        recipient,
+        position: position_address(position_id),
+        source_balance: balance_address(owner, position_id),
+        system_program: System::id(),
+    }
+    .to_account_metas(None);
+    accounts.push(AccountMeta::new(
+        balance_address(recipient, position_id),
+        false,
+    ));
+    Instruction {
+        program_id: ID,
+        accounts,
+        data: instruction::TransferPosition {
+            args: TransferPositionArgs { amount },
+        }
+        .data(),
+    }
+}
+
+fn batch_transfer_position_accounts(
+    owner: Address,
+    recipient: Address,
+    position_ids: &[[u8; 32]],
+) -> Vec<AccountMeta> {
+    position_ids
+        .iter()
+        .flat_map(|position_id| {
+            [
+                AccountMeta::new_readonly(position_address(*position_id), false),
+                AccountMeta::new(balance_address(owner, *position_id), false),
+                AccountMeta::new(balance_address(recipient, *position_id), false),
+            ]
+        })
+        .collect()
+}
+
+fn batch_transfer_positions_instruction(
+    owner: Address,
+    recipient: Address,
+    position_ids: &[[u8; 32]],
+    amounts: Vec<u64>,
+) -> Instruction {
+    let mut account_metas = accounts::BatchTransferPositions { owner, recipient }
+        .to_account_metas(None);
+    account_metas.extend(batch_transfer_position_accounts(
+        owner,
+        recipient,
+        position_ids,
+    ));
+    Instruction {
+        program_id: ID,
+        accounts: account_metas,
+        data: instruction::BatchTransferPositions {
+            args: BatchTransferPositionsArgs { amounts },
+        }
+        .data(),
     }
 }
 
@@ -1846,6 +1917,409 @@ fn invalid_native_transitions_leave_every_balance_unchanged() {
     assert_eq!(context.balance(payer, first_position).amount, 1);
     assert_eq!(context.balance(payer, second_position).amount, 1);
     assert_eq!(context.token_amount(owner_account), 10);
+    assert_eq!(context.token_amount(vault_address(mint, token_program)), 10);
+}
+
+#[test]
+fn single_transfers_initialize_recipients_and_preserve_exact_balances() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let token_program = anchor_spl::token::ID;
+    let (mint, owner_account) = context.create_funded_collateral(token_program, 100);
+    context
+        .send(
+            register_collateral_instruction(payer, mint, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let (condition, partition, position_ids) = prepare_root_positions(&mut context, mint, 2, payer);
+    context
+        .send(
+            split_from_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RootCollateralArgs {
+                    condition_id: condition.condition_id,
+                    partition,
+                    amount: 100,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let position_id = position_ids[0];
+    let recipient = Keypair::new();
+    context
+        .svm
+        .set_account(
+            balance_address(recipient.pubkey(), position_id),
+            Account {
+                lamports: 1,
+                data: Vec::new(),
+                owner: System::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
+        .unwrap();
+    let failed_recipient = Keypair::new().pubkey();
+    assert!(context
+        .send(
+            transfer_position_instruction(payer, failed_recipient, position_id, 101),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert!(context
+        .svm
+        .get_account(&balance_address(failed_recipient, position_id))
+        .is_none());
+
+    let metadata = context
+        .send(
+            transfer_position_instruction(payer, recipient.pubkey(), position_id, 40),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_within_transaction_limit(&metadata);
+    assert_eq!(context.balance(payer, position_id).amount, 60);
+    assert_eq!(context.balance(recipient.pubkey(), position_id).amount, 40);
+
+    assert!(context
+        .send(
+            transfer_position_instruction(payer, payer, position_id, 60),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert_eq!(context.balance(payer, position_id).amount, 60);
+    assert!(context
+        .send(
+            transfer_position_instruction(payer, recipient.pubkey(), position_id, 0),
+            TransactionVersion::V0,
+        )
+        .is_err());
+
+    context
+        .send(
+            report_payouts_instruction(payer, condition.condition_id, vec![1, 0]),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let existing_metadata = context
+        .send(
+            transfer_position_instruction(payer, recipient.pubkey(), position_id, 10),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, position_id).amount, 50);
+    assert_eq!(context.balance(recipient.pubkey(), position_id).amount, 50);
+
+    context
+        .send_with_owner(
+            transfer_position_instruction(recipient.pubkey(), payer, position_id, 50),
+            &recipient,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, position_id).amount, 100);
+    assert_eq!(context.balance(recipient.pubkey(), position_id).amount, 0);
+
+    let destination_address = balance_address(recipient.pubkey(), position_id);
+    let mut destination_account = context.svm.get_account(&destination_address).unwrap();
+    let mut destination_balance: PositionBalance = deserialize_account(&destination_account.data);
+    destination_balance.amount = u64::MAX;
+    destination_account.data = serialize_account(&destination_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(destination_address, destination_account.clone())
+        .unwrap();
+    assert!(context
+        .send(
+            transfer_position_instruction(payer, recipient.pubkey(), position_id, 1),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert_eq!(context.balance(payer, position_id).amount, 100);
+    assert_eq!(
+        context.balance(recipient.pubkey(), position_id).amount,
+        u64::MAX
+    );
+
+    destination_balance.amount = 0;
+    destination_account.data = serialize_account(&destination_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(destination_address, destination_account)
+        .unwrap();
+    let attacker = Keypair::new();
+    context.svm.airdrop(&attacker.pubkey(), 1_000_000).unwrap();
+    let mut unauthorized =
+        transfer_position_instruction(payer, recipient.pubkey(), position_id, 1);
+    unauthorized.accounts[0] = AccountMeta::new(attacker.pubkey(), true);
+    assert!(context.send_with_owner(unauthorized, &attacker).is_err());
+
+    assert_eq!(context.balance(payer, position_id).amount, 100);
+    assert_eq!(context.balance(recipient.pubkey(), position_id).amount, 0);
+    assert_eq!(context.token_amount(owner_account), 0);
+    assert_eq!(context.token_amount(vault_address(mint, token_program)), 100);
+    println!(
+        "transfer_position first_use_compute_units={} existing_compute_units={}",
+        metadata.compute_units_consumed, existing_metadata.compute_units_consumed
+    );
+}
+
+#[test]
+fn batch_transfer_capacity_is_measured_for_two_eight_and_sixteen_positions() {
+    for position_count in [2, 8, 16] {
+        let mut context = TestContext::new();
+        let payer = context.payer.pubkey();
+        let token_program = anchor_spl::token::ID;
+        let (mint, owner_account) = context.create_funded_collateral(token_program, 10);
+        context
+            .send(
+                register_collateral_instruction(payer, mint, token_program),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+        let (condition, partition, position_ids) = prepare_root_positions(
+            &mut context,
+            mint,
+            position_count,
+            Pubkey::new_from_array([position_count as u8; 32]),
+        );
+        let root_version = if position_count == 2 {
+            TransactionVersion::V0
+        } else {
+            TransactionVersion::V1
+        };
+        context
+            .send(
+                split_from_collateral_instruction(
+                    payer,
+                    owner_account,
+                    mint,
+                    token_program,
+                    RootCollateralArgs {
+                        condition_id: condition.condition_id,
+                        partition,
+                        amount: 5,
+                    },
+                ),
+                root_version,
+            )
+            .unwrap();
+
+        let recipient = Keypair::new().pubkey();
+        for position_id in &position_ids {
+            context
+                .send(
+                    initialize_balance_instruction(payer, recipient, *position_id),
+                    TransactionVersion::V0,
+                )
+                .unwrap();
+        }
+        let instruction = batch_transfer_positions_instruction(
+            payer,
+            recipient,
+            &position_ids,
+            vec![1; position_ids.len()],
+        );
+        let account_count = instruction.accounts.len();
+        let instruction_data_bytes = instruction.data.len();
+        let transaction_bytes =
+            context.transaction_size(instruction.clone(), TransactionVersion::V0);
+        let lookup_transaction_bytes =
+            context.transaction_size_with_lookup(instruction.clone(), 2);
+        assert!(lookup_transaction_bytes <= 1_232);
+        let version = if transaction_bytes <= 1_232 {
+            TransactionVersion::V0
+        } else {
+            TransactionVersion::V1
+        };
+        let metadata = context.send(instruction, version).unwrap();
+        assert_within_transaction_limit(&metadata);
+        assert!(position_ids.iter().all(|position_id| {
+            context.balance(payer, *position_id).amount == 4
+                && context.balance(recipient, *position_id).amount == 1
+        }));
+
+        let self_transfer = batch_transfer_positions_instruction(
+            payer,
+            payer,
+            &position_ids,
+            vec![4; position_ids.len()],
+        );
+        assert!(context.send(self_transfer, version).is_err());
+        assert!(position_ids
+            .iter()
+            .all(|position_id| context.balance(payer, *position_id).amount == 4));
+        println!(
+            "batch_transfer_positions positions={position_count} accounts={account_count} instruction_data_bytes={instruction_data_bytes} transaction_bytes={transaction_bytes} lookup_transaction_bytes={lookup_transaction_bytes} compute_units={}",
+            metadata.compute_units_consumed
+        );
+    }
+}
+
+#[test]
+fn invalid_batch_transfers_roll_back_every_entry() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let token_program = anchor_spl::token::ID;
+    let (mint, owner_account) = context.create_funded_collateral(token_program, 10);
+    context
+        .send(
+            register_collateral_instruction(payer, mint, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let (condition, partition, position_ids) = prepare_root_positions(&mut context, mint, 3, payer);
+    context
+        .send(
+            split_from_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RootCollateralArgs {
+                    condition_id: condition.condition_id,
+                    partition,
+                    amount: 10,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let recipient = Keypair::new().pubkey();
+    for position_id in &position_ids {
+        context
+            .send(
+                initialize_balance_instruction(payer, recipient, *position_id),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+    }
+
+    let invalid = [
+        batch_transfer_positions_instruction(payer, recipient, &[], vec![]),
+        batch_transfer_positions_instruction(payer, recipient, &position_ids, vec![1, 0, 1]),
+        batch_transfer_positions_instruction(payer, recipient, &position_ids, vec![1, 11, 1]),
+    ];
+    for instruction in invalid {
+        assert!(context.send(instruction, TransactionVersion::V0).is_err());
+        assert!(position_ids.iter().all(|position_id| {
+            context.balance(payer, *position_id).amount == 10
+                && context.balance(recipient, *position_id).amount == 0
+        }));
+    }
+
+    let mut missing_account = batch_transfer_positions_instruction(
+        payer,
+        recipient,
+        &position_ids,
+        vec![1; position_ids.len()],
+    );
+    missing_account.accounts.pop();
+    assert!(context
+        .send(missing_account, TransactionVersion::V0)
+        .is_err());
+
+    let duplicate_ids = [position_ids[0], position_ids[0]];
+    assert!(context
+        .send(
+            batch_transfer_positions_instruction(
+                payer,
+                recipient,
+                &duplicate_ids,
+                vec![1, 1],
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+
+    let mut wrong_order = batch_transfer_positions_instruction(
+        payer,
+        recipient,
+        &position_ids,
+        vec![1; position_ids.len()],
+    );
+    wrong_order.accounts.swap(2, 5);
+    assert!(context.send(wrong_order, TransactionVersion::V0).is_err());
+
+    let missing_recipient = Keypair::new().pubkey();
+    assert!(context
+        .send(
+            batch_transfer_positions_instruction(
+                payer,
+                missing_recipient,
+                &position_ids,
+                vec![1; position_ids.len()],
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+
+    let second_destination = balance_address(recipient, position_ids[1]);
+    let mut second_destination_account = context.svm.get_account(&second_destination).unwrap();
+    let mut second_destination_balance: PositionBalance =
+        deserialize_account(&second_destination_account.data);
+    second_destination_balance.amount = u64::MAX;
+    second_destination_account.data =
+        serialize_account(&second_destination_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(second_destination, second_destination_account.clone())
+        .unwrap();
+    assert!(context
+        .send(
+            batch_transfer_positions_instruction(
+                payer,
+                recipient,
+                &position_ids,
+                vec![1; position_ids.len()],
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert_eq!(context.balance(payer, position_ids[0]).amount, 10);
+    assert_eq!(context.balance(recipient, position_ids[0]).amount, 0);
+
+    second_destination_balance.amount = 0;
+    second_destination_account.data =
+        serialize_account(&second_destination_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(second_destination, second_destination_account)
+        .unwrap();
+    let attacker = Keypair::new();
+    context.svm.airdrop(&attacker.pubkey(), 1_000_000).unwrap();
+    let mut unauthorized = batch_transfer_positions_instruction(
+        payer,
+        recipient,
+        &position_ids,
+        vec![1; position_ids.len()],
+    );
+    unauthorized.accounts[0] = AccountMeta::new(attacker.pubkey(), true);
+    assert!(context.send_with_owner(unauthorized, &attacker).is_err());
+
+    let oversized_ids = vec![position_ids[0]; 17];
+    assert!(context
+        .send(
+            batch_transfer_positions_instruction(
+                payer,
+                recipient,
+                &oversized_ids,
+                vec![1; 17],
+            ),
+            TransactionVersion::V1,
+        )
+        .is_err());
+
+    assert!(position_ids.iter().all(|position_id| {
+        context.balance(payer, *position_id).amount == 10
+            && context.balance(recipient, *position_id).amount == 0
+    }));
+    assert_eq!(context.token_amount(owner_account), 0);
     assert_eq!(context.token_amount(vault_address(mint, token_program)), 10);
 }
 

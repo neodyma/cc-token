@@ -45,6 +45,8 @@ import {
   fetchVerifiedPosition,
   fetchVerifiedPositionBalance,
   getAppendPayoutReportInstruction,
+  getBatchTransferNativePositionsInstruction,
+  getBatchTransferSetupInstructions,
   getCollateralAddress,
   getCollectionAddress,
   getClosePositionBalanceInstruction,
@@ -65,6 +67,7 @@ import {
   getSplitRootCollateralInstruction,
   getSplitNativePositionInstruction,
   getNativePositionSetupInstructions,
+  getTransferNativePositionInstruction,
   planPayoutReport,
   ROOT_COLLECTION_ID,
   selectTransactionVersion,
@@ -291,6 +294,14 @@ test("generated client submits identity and resolution instructions through v0 a
   await sendInstruction(payer, await getSplitRootCollateralInstruction(rootInput), v0Only);
   assert.equal((await fetchToken(rpc, ownerTokenAccount)).data.amount, 700n);
   assert.equal((await fetchToken(rpc, config.data.vault)).data.amount, 300n);
+  const rootPositionIds = rootPartition.map((indexSet) => {
+    const rootCollectionId = deriveCollectionId(
+      ROOT_COLLECTION_ID,
+      conditionId,
+      indexSet,
+    ).collectionId;
+    return derivePositionId(mint.address, rootCollectionId);
+  });
   for (const indexSet of rootPartition) {
     const rootCollectionId = deriveCollectionId(
       ROOT_COLLECTION_ID,
@@ -363,6 +374,92 @@ test("generated client submits identity and resolution instructions through v0 a
   assert.equal(restoredGroupedBalance.account.data.amount, 300n);
   assert.equal((await fetchToken(rpc, ownerTokenAccount)).data.amount, 700n);
   assert.equal((await fetchToken(rpc, config.data.vault)).data.amount, 300n);
+
+  const transferRecipient = await generateKeyPairSigner();
+  await sendInstruction(
+    payer,
+    await getTransferNativePositionInstruction({
+      owner: payer,
+      recipient: transferRecipient.address,
+      positionId: rootPositionIds[0]!,
+      amount: 40n,
+    }),
+    v0Only,
+  );
+  let payerFirstBalance = await fetchVerifiedPositionBalance(
+    rpc,
+    payer.address,
+    rootPositionIds[0]!,
+  );
+  let recipientFirstBalance = await fetchVerifiedPositionBalance(
+    rpc,
+    transferRecipient.address,
+    rootPositionIds[0]!,
+  );
+  assert.equal(payerFirstBalance.exists && payerFirstBalance.account.data.amount, 260n);
+  assert.equal(recipientFirstBalance.exists && recipientFirstBalance.account.data.amount, 40n);
+  await sendInstruction(
+    payer,
+    await getTransferNativePositionInstruction({
+      owner: transferRecipient,
+      recipient: payer.address,
+      positionId: rootPositionIds[0]!,
+      amount: 10n,
+    }),
+    v0Only,
+  );
+
+  const batchTransfers = rootPositionIds.map((positionId, index) => ({
+    positionId,
+    amount: index === 0 ? 20n : 25n,
+  }));
+  const batchSetup = await getBatchTransferSetupInstructions({
+    payer,
+    recipient: transferRecipient.address,
+    transfers: batchTransfers,
+  });
+  for (const instruction of batchSetup) {
+    await sendInstruction(payer, instruction, v0Only);
+  }
+  await sendInstruction(
+    payer,
+    await getBatchTransferNativePositionsInstruction({
+      owner: payer,
+      recipient: transferRecipient.address,
+      transfers: batchTransfers,
+    }),
+    v0Only,
+  );
+  payerFirstBalance = await fetchVerifiedPositionBalance(rpc, payer.address, rootPositionIds[0]!);
+  recipientFirstBalance = await fetchVerifiedPositionBalance(
+    rpc,
+    transferRecipient.address,
+    rootPositionIds[0]!,
+  );
+  assert.equal(payerFirstBalance.exists && payerFirstBalance.account.data.amount, 250n);
+  assert.equal(recipientFirstBalance.exists && recipientFirstBalance.account.data.amount, 50n);
+  await sendInstruction(
+    payer,
+    await getBatchTransferNativePositionsInstruction({
+      owner: transferRecipient,
+      recipient: payer.address,
+      transfers: [
+        { positionId: rootPositionIds[0]!, amount: 50n },
+        { positionId: rootPositionIds[1]!, amount: 25n },
+      ],
+    }),
+    v0Only,
+  );
+  for (const positionId of rootPositionIds) {
+    const payerBalance = await fetchVerifiedPositionBalance(rpc, payer.address, positionId);
+    const recipientBalance = await fetchVerifiedPositionBalance(
+      rpc,
+      transferRecipient.address,
+      positionId,
+    );
+    assert.equal(payerBalance.exists && payerBalance.account.data.amount, 300n);
+    assert.equal(recipientBalance.exists && recipientBalance.account.data.amount, 0n);
+  }
 
   await sendInstruction(payer, await getMergeRootCollateralInstruction(rootInput), v0Only);
   assert.equal((await fetchToken(rpc, ownerTokenAccount)).data.amount, 1_000n);
