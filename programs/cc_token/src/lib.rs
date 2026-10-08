@@ -130,12 +130,15 @@ pub mod cc_token {
         wrapping::initialize_wrapper(ctx)
     }
 
-    pub fn wrap_position(ctx: Context<WrapPosition>) -> CcTokenResult {
-        wrapping::wrap_position(ctx)
+    pub fn wrap_position(ctx: Context<WrapPosition>, args: WrapPositionArgs) -> CcTokenResult {
+        wrapping::wrap_position(ctx, args)
     }
 
-    pub fn unwrap_position(ctx: Context<UnwrapPosition>) -> CcTokenResult {
-        wrapping::unwrap_position(ctx)
+    pub fn unwrap_position(
+        ctx: Context<UnwrapPosition>,
+        args: UnwrapPositionArgs,
+    ) -> CcTokenResult {
+        wrapping::unwrap_position(ctx, args)
     }
 
     pub fn compress_position(ctx: Context<CompressPosition>) -> CcTokenResult {
