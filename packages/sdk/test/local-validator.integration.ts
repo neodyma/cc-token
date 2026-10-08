@@ -23,10 +23,13 @@ import {
 import {
   deriveCollectionId,
   deriveConditionId,
+  DefinitionVerificationError,
   fetchCollectionDefinition,
   fetchCondition,
   fetchMaybePayoutReport,
   fetchPayoutReport,
+  fetchVerifiedCollection,
+  fetchVerifiedCondition,
   getAppendPayoutReportInstruction,
   getCollectionAddress,
   getConditionAddress,
@@ -159,6 +162,82 @@ test("generated client submits identity and resolution instructions through v0 a
     v1CollectionId,
   );
 
+  const nestedCollectionId = deriveCollectionId(collectionId, conditionId, v1IndexSet).collectionId;
+  assert.deepEqual(
+    nestedCollectionId,
+    deriveCollectionId(v1CollectionId, conditionId, indexSet).collectionId,
+  );
+  const [nestedCollectionAddress] = await getCollectionAddress(nestedCollectionId);
+  await sendInstruction(
+    payer,
+    getRegisterCollectionInstruction({
+      payer,
+      condition: conditionAddress,
+      collection: nestedCollectionAddress,
+      parentCollection: collectionAddress,
+      collectionId: nestedCollectionId,
+      parentCollectionId: collectionId,
+      conditionId,
+      indexSet: { words: [...v1IndexSet] },
+    }),
+    v0Only,
+  );
+  await sendInstruction(
+    payer,
+    getRegisterCollectionInstruction({
+      payer,
+      condition: conditionAddress,
+      collection: nestedCollectionAddress,
+      parentCollection: v1CollectionAddress,
+      collectionId: nestedCollectionId,
+      parentCollectionId: v1CollectionId,
+      conditionId,
+      indexSet: { words: [...indexSet] },
+    }),
+    v0Only,
+  );
+
+  const verifiedNested = await fetchVerifiedCollection(rpc, nestedCollectionId);
+  assert.equal(verifiedNested.constructionPath.length, 2);
+  assert.equal(verifiedNested.factors.length, 2);
+  assert.deepEqual(verifiedNested.constructionPath[0]?.collection.data.collectionId, collectionId);
+  assert.deepEqual(
+    verifiedNested.factors.map((factor) => factor.indexSet),
+    [indexSet, v1IndexSet],
+  );
+  await assert.rejects(
+    () => fetchVerifiedCollection(rpc, nestedCollectionId, { maxDepth: 1 }),
+    (error) => error instanceof DefinitionVerificationError && error.code === "depth_limit",
+  );
+
+  const repeatedCollectionId = deriveCollectionId(collectionId, conditionId, indexSet).collectionId;
+  const [repeatedCollectionAddress] = await getCollectionAddress(repeatedCollectionId);
+  await sendInstruction(
+    payer,
+    getRegisterCollectionInstruction({
+      payer,
+      condition: conditionAddress,
+      collection: repeatedCollectionAddress,
+      parentCollection: collectionAddress,
+      collectionId: repeatedCollectionId,
+      parentCollectionId: collectionId,
+      conditionId,
+      indexSet: { words: [...indexSet] },
+    }),
+    v0Only,
+  );
+  const verifiedRepeated = await fetchVerifiedCollection(rpc, repeatedCollectionId);
+  assert.equal(verifiedRepeated.factors.length, 2);
+  assert.deepEqual(verifiedRepeated.factors[0]?.indexSet, indexSet);
+  assert.deepEqual(verifiedRepeated.factors[1]?.indexSet, indexSet);
+
+  const verifiedRoot = await fetchVerifiedCollection(rpc, ROOT_COLLECTION_ID);
+  assert.deepEqual(verifiedRoot.factors, []);
+  await assert.rejects(
+    () => fetchVerifiedCollection(rpc, new Uint8Array(32).fill(99)),
+    (error) => error instanceof DefinitionVerificationError && error.code === "missing_definition",
+  );
+
   const directQuestionId = new Uint8Array(32).fill(23);
   const directConditionId = deriveConditionId(payer.address, directQuestionId, 256);
   const [directConditionAddress] = await getConditionAddress(directConditionId);
@@ -187,7 +266,7 @@ test("generated client submits identity and resolution instructions through v0 a
     }),
     v1Capable,
   );
-  const directCondition = await fetchCondition(rpc, directConditionAddress);
+  const directCondition = await fetchVerifiedCondition(rpc, directConditionId);
   assert.equal(directCondition.data.status, 1);
   assert.equal(directCondition.data.payoutDenominator, 1n);
   assert.deepEqual(directCondition.data.payoutNumerators, directPayouts);
@@ -250,7 +329,7 @@ test("generated client submits identity and resolution instructions through v0 a
     v0Only,
   );
 
-  const stagedCondition = await fetchCondition(rpc, stagedConditionAddress);
+  const stagedCondition = await fetchVerifiedCondition(rpc, stagedConditionId);
   assert.equal(stagedCondition.data.status, 1);
   assert.equal(stagedCondition.data.payoutDenominator, 7n);
   assert.deepEqual(stagedCondition.data.payoutNumerators, stagedPayouts);

@@ -113,7 +113,7 @@
 - [x] Position derivation
 - [x] Partition and payout helpers
 - [x] Transaction-version selection
-- [ ] Complete definition retrieval (condition and collection retrieval is implemented)
+- [ ] Complete definition retrieval (condition and collection retrieval and verification is implemented)
 - [ ] Balance discovery across representations
 - [x] Logical subset normalization
 - [x] Explicit repeated-factor construction
