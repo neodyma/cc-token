@@ -50,12 +50,18 @@ pub mod cc_token {
         balance::close_balance(ctx)
     }
 
-    pub fn split_from_collateral(ctx: Context<SplitFromCollateral>) -> CcTokenResult {
-        positions::split_from_collateral(ctx)
+    pub fn split_from_collateral(
+        ctx: Context<SplitFromCollateral>,
+        args: RootCollateralArgs,
+    ) -> CcTokenResult {
+        positions::split_from_collateral(ctx, args)
     }
 
-    pub fn merge_to_collateral(ctx: Context<MergeToCollateral>) -> CcTokenResult {
-        positions::merge_to_collateral(ctx)
+    pub fn merge_to_collateral(
+        ctx: Context<MergeToCollateral>,
+        args: RootCollateralArgs,
+    ) -> CcTokenResult {
+        positions::merge_to_collateral(ctx, args)
     }
 
     pub fn split_position(ctx: Context<SplitPosition>) -> CcTokenResult {

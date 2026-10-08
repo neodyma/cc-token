@@ -56,6 +56,20 @@ pub enum CcTokenError {
     PositionBalanceMismatch,
     #[msg("A nonzero position balance cannot be closed")]
     NonzeroPositionBalance,
+    #[msg("Amount must be greater than zero")]
+    ZeroAmount,
+    #[msg("A collateral split or merge requires a full partition")]
+    FullCoverRequired,
+    #[msg("Remaining accounts must contain one position and balance pair per partition item")]
+    InvalidRemainingAccounts,
+    #[msg("An account required for mutation is not writable")]
+    AccountNotWritable,
+    #[msg("An account appears more than once in the instruction")]
+    DuplicateAccount,
+    #[msg("Position balance is insufficient")]
+    InsufficientPositionBalance,
+    #[msg("Collateral token balance is insufficient")]
+    InsufficientCollateral,
     #[msg("Only the condition resolver may report payouts")]
     UnauthorizedResolver,
     #[msg("Condition payouts have already been reported")]

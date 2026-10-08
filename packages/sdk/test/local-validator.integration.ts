@@ -22,7 +22,10 @@ import {
 } from "@solana/kit";
 import {
   fetchToken,
+  findAssociatedTokenPda,
+  getCreateAssociatedTokenInstruction,
   getCreateMintInstructionPlan,
+  getMintToInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 
@@ -41,21 +44,24 @@ import {
   fetchVerifiedCondition,
   fetchVerifiedPosition,
   fetchVerifiedPositionBalance,
-  findConfigPda,
-  findVaultAuthorityPda,
   getAppendPayoutReportInstruction,
+  getCollateralAddress,
   getCollectionAddress,
   getClosePositionBalanceInstruction,
   getConditionAddress,
   getFinalizePayoutReportInstruction,
   getInitializePositionBalanceInstruction,
+  getMergeRootCollateralInstruction,
   getInitializePayoutReportInstruction,
   getPayoutReportAddress,
   getPrepareConditionInstruction,
   getRegisterCollateralInstructionAsync,
   getRegisterCollectionInstruction,
   getRegisterPositionForCollectionInstruction,
+  getRootCollateralSetupInstructions,
   getReportPayoutsInstruction,
+  getVaultAuthorityAddress,
+  getSplitRootCollateralInstruction,
   planPayoutReport,
   ROOT_COLLECTION_ID,
   selectTransactionVersion,
@@ -148,10 +154,8 @@ test("generated client submits identity and resolution instructions through v0 a
   });
   await sendInstructions(payer, createMintInstructions, v0Only);
 
-  const [configAddress, configBump] = await findConfigPda({ mint: mint.address });
-  const [vaultAuthority, vaultAuthorityBump] = await findVaultAuthorityPda({
-    mint: mint.address,
-  });
+  const [configAddress, configBump] = await getCollateralAddress(mint.address);
+  const [vaultAuthority, vaultAuthorityBump] = await getVaultAuthorityAddress(mint.address);
   const registerCollateral = await getRegisterCollateralInstructionAsync({ payer, mint });
   await sendInstruction(payer, registerCollateral, v0Only);
 
@@ -170,6 +174,30 @@ test("generated client submits identity and resolution instructions through v0 a
   assert.equal(vault.data.mint, mint.address);
   assert.equal(vault.data.owner, vaultAuthority);
   assert.equal(vault.data.amount, 0n);
+
+  const [ownerTokenAccount] = await findAssociatedTokenPda({
+    owner: payer.address,
+    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    mint: mint.address,
+  });
+  await sendInstructions(
+    payer,
+    [
+      getCreateAssociatedTokenInstruction({
+        payer,
+        ata: ownerTokenAccount,
+        owner: payer.address,
+        mint: mint.address,
+      }),
+      getMintToInstruction({
+        mint: mint.address,
+        token: ownerTokenAccount,
+        mintAuthority: payer,
+        amount: 1_000n,
+      }),
+    ],
+    v0Only,
+  );
 
   const questionId = new Uint8Array(32).fill(17);
   const conditionId = deriveConditionId(payer.address, questionId, 8);
@@ -231,6 +259,50 @@ test("generated client submits identity and resolution instructions through v0 a
     }),
     v0Only,
   );
+
+  const rootPartition = [
+    [0x0fn, 0n, 0n, 0n],
+    [0xf0n, 0n, 0n, 0n],
+  ] as const;
+  const rootSetup = await getRootCollateralSetupInstructions({
+    payer,
+    owner: payer.address,
+    collateralMint: mint.address,
+    conditionId,
+    outcomeCount: 8,
+    partition: rootPartition,
+  });
+  for (const instruction of rootSetup) {
+    await sendInstruction(payer, instruction, v0Only);
+  }
+  const rootInput = {
+    owner: payer,
+    ownerTokenAccount,
+    collateralMint: mint.address,
+    tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    conditionId,
+    outcomeCount: 8,
+    partition: rootPartition,
+    amount: 300n,
+  } as const;
+  await sendInstruction(payer, await getSplitRootCollateralInstruction(rootInput), v0Only);
+  assert.equal((await fetchToken(rpc, ownerTokenAccount)).data.amount, 700n);
+  assert.equal((await fetchToken(rpc, config.data.vault)).data.amount, 300n);
+  for (const indexSet of rootPartition) {
+    const rootCollectionId = deriveCollectionId(
+      ROOT_COLLECTION_ID,
+      conditionId,
+      indexSet,
+    ).collectionId;
+    const rootPositionId = derivePositionId(mint.address, rootCollectionId);
+    const balance = await fetchVerifiedPositionBalance(rpc, payer.address, rootPositionId);
+    assert.equal(balance.exists, true);
+    if (!balance.exists) throw new Error("expected a root child balance");
+    assert.equal(balance.account.data.amount, 300n);
+  }
+  await sendInstruction(payer, await getMergeRootCollateralInstruction(rootInput), v0Only);
+  assert.equal((await fetchToken(rpc, ownerTokenAccount)).data.amount, 1_000n);
+  assert.equal((await fetchToken(rpc, config.data.vault)).data.amount, 0n);
   const openBalance = await fetchVerifiedPositionBalance(rpc, payer.address, positionId);
   assert.equal(openBalance.exists, true);
   if (!openBalance.exists) throw new Error("expected an open native position balance");

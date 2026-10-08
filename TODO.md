@@ -49,16 +49,16 @@
 
 ## 4. Native position operations
 
-- [ ] Split collateral into positions
+- [x] Split collateral into root positions
 - [ ] Split an existing position into refined positions
-- [ ] Merge complete child sets back into collateral
+- [x] Merge complete root sets back into collateral
 - [ ] Merge refined positions into their parent
 - [ ] Transfer native positions
 - [ ] Bounded batch transfers
 - [ ] Automatic first-use destination initialization where practical
-- [ ] Tests for insufficient balances, overflow, wrong identities and rollback
+- [x] Root-operation tests for insufficient balances, overflow, wrong identities and rollback
 - [ ] Diagram examples A, B and C as runtime tests
-- [ ] Measured limits for 2, 8 and 16 output operations
+- [x] Measured limits for 2, 8 and 16 output root operations
 
 ## 5. Resolution and redemption
 
