@@ -6,9 +6,8 @@ use anchor_spl::token_interface::{
 use crate::{
     constants::{COLLATERAL_SEED, CONDITION_SEED, VAULT_SEED},
     events::CollateralSplit,
-    instructions::positions::root_collateral::{
-        apply_balance_updates, validate_root_transition, BalanceOperation, RootCollateralArgs,
-    },
+    instructions::positions::position_balance::{apply_balance_updates, BalanceOperation},
+    instructions::positions::root_collateral::{validate_root_transition, RootCollateralArgs},
     prelude::*,
 };
 

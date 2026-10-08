@@ -65,6 +65,26 @@ pub struct CollateralMerged {
 }
 
 #[event]
+pub struct PositionSplit {
+    pub owner: Pubkey,
+    pub collateral_mint: Pubkey,
+    pub source_position_id: [u8; 32],
+    pub condition_id: [u8; 32],
+    pub amount: u64,
+    pub position_count: u16,
+}
+
+#[event]
+pub struct PositionsMerged {
+    pub owner: Pubkey,
+    pub collateral_mint: Pubkey,
+    pub destination_position_id: [u8; 32],
+    pub condition_id: [u8; 32],
+    pub amount: u64,
+    pub position_count: u16,
+}
+
+#[event]
 pub struct PayoutsReported {
     pub condition_id: [u8; 32],
     pub resolver: Pubkey,

@@ -64,12 +64,15 @@ pub mod cc_token {
         positions::merge_to_collateral(ctx, args)
     }
 
-    pub fn split_position(ctx: Context<SplitPosition>) -> CcTokenResult {
-        positions::split_position(ctx)
+    pub fn split_position(ctx: Context<SplitPosition>, args: NativePositionArgs) -> CcTokenResult {
+        positions::split_position(ctx, args)
     }
 
-    pub fn merge_positions(ctx: Context<MergePositions>) -> CcTokenResult {
-        positions::merge_positions(ctx)
+    pub fn merge_positions(
+        ctx: Context<MergePositions>,
+        args: NativePositionArgs,
+    ) -> CcTokenResult {
+        positions::merge_positions(ctx, args)
     }
 
     pub fn transfer_position(ctx: Context<TransferPosition>) -> CcTokenResult {

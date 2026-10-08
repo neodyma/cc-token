@@ -60,6 +60,8 @@ pub enum CcTokenError {
     ZeroAmount,
     #[msg("A collateral split or merge requires a full partition")]
     FullCoverRequired,
+    #[msg("A root full-partition transition requires a collateral handler")]
+    RootCollateralRequired,
     #[msg("Remaining accounts must contain one position and balance pair per partition item")]
     InvalidRemainingAccounts,
     #[msg("An account required for mutation is not writable")]
