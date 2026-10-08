@@ -7,7 +7,6 @@ import {
   describeSubset,
   formatTokenAmount,
   indexSetFromOutcomes,
-  initialPortfolio,
   mergeOptions,
   mergePositions,
   mintedSet,
@@ -19,6 +18,7 @@ import {
   toHex,
   type Factor,
 } from "../src/scenario.ts";
+import { openLedger } from "../src/ledger.ts";
 
 const DEMO_CONDITIONS = [
   defineCondition("sol-price", "SOL/USD at expiry", "SOL/USD at expiry", [
@@ -213,14 +213,14 @@ test("splits refine a claim and merges restore the original holdings", () => {
     "logical",
     scenario.collateral.mint,
   );
-  const start = initialPortfolio(plan.factors, 1_000n);
+  const start = openLedger(1_000n, plan.factors, 1_000n).portfolio;
   assert.equal(start.holdings.length, 2);
 
   const pairs = [indexSetFromOutcomes([0, 1]), indexSetFromOutcomes([2, 3])];
   const refined = splitPosition(start, [], ref, pairs, 400n);
   assert.deepEqual(
     refined.holdings.map((holding) => holding.amount),
-    [1_000n, 600n, 400n, 400n],
+    [600n, 1_000n, 400n, 400n],
   );
 
   const singles = [indexSetFromOutcomes([0]), indexSetFromOutcomes([1])];
@@ -259,7 +259,7 @@ test("adding a question splits a claim without touching collateral", () => {
   const approved = [
     { conditionId: buyback!.conditionId, outcomeCount: 2, indexSet: indexSetFromOutcomes([0]) },
   ];
-  const start = initialPortfolio(approved, 50n);
+  const start = openLedger(50n, approved, 50n).portfolio;
   const ref = { conditionId: level!.conditionId, outcomeCount: 2 };
   const split = splitPosition(
     start,

@@ -52,3 +52,21 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
 }
+
+.react-flow {
+  --xy-background-color: var(--page);
+  --xy-background-pattern-color: var(--line);
+  --xy-edge-stroke: var(--muted);
+  --xy-minimap-background-color: var(--panel);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--page) 70%, transparent);
+  --xy-minimap-node-background-color: var(--line);
+  --xy-controls-button-background-color: var(--panel);
+  --xy-controls-button-background-color-hover: var(--accent-soft);
+  --xy-controls-button-color: var(--ink);
+  --xy-controls-button-border-color: var(--line);
+}
+
+/* Edges attach here, but nothing can be connected by hand. */
+.react-flow .graph-handle {
+  visibility: hidden;
+}

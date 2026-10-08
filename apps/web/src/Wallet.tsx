@@ -21,7 +21,7 @@ const WALLET_LINKS = [
   { name: "Backpack", url: "https://backpack.app/download" },
 ] as const;
 
-type Loaded<T> = { state: "loading" } | { state: "ready"; value: T } | { state: "failed" };
+export type Loaded<T> = { state: "loading" } | { state: "ready"; value: T } | { state: "failed" };
 
 function useLoaded<T>(load: () => Promise<T>, key: string): Loaded<T> {
   const [result, setResult] = useState<Loaded<T>>({ state: "loading" });
@@ -238,8 +238,8 @@ function Balance(props: { address: Address }) {
   return <div className="font-mono text-sm">{formatSol(balance.value)}</div>;
 }
 
-function ProgramStatus() {
-  const deployed = useLoaded(
+export function useProgramDeployed(): Loaded<boolean> {
+  return useLoaded(
     async () =>
       (
         await client.rpc
@@ -251,6 +251,10 @@ function ProgramStatus() {
       ).value !== null,
     CC_TOKEN_PROGRAM_ADDRESS,
   );
+}
+
+function ProgramStatus() {
+  const deployed = useProgramDeployed();
   const status =
     deployed.state === "loading"
       ? { dot: "bg-muted", text: "checking", detail: `Checking ${CLUSTER.name} for the program.` }
@@ -261,7 +265,7 @@ function ProgramStatus() {
           : {
               dot: "bg-muted",
               text: "preview",
-              detail: `The program is not on ${CLUSTER.name} yet, so a connected wallet is not used.`,
+              detail: `The program is not on ${CLUSTER.name} yet. See the Live page.`,
             };
   return (
     <span

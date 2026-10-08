@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ROUTES } from "./routes.ts";
 
 const SECTIONS = [
   { id: "short-version", title: "The short version" },
@@ -137,10 +138,10 @@ export function HowItWorks() {
           ))}
         </ul>
         <a
-          href="#/"
+          href={ROUTES.simulator}
           className="mt-4 block rounded-md bg-accent px-3 py-2 text-center text-sm font-medium text-panel"
         >
-          Try it in the Composer
+          Try it in the simulator
         </a>
       </nav>
 
@@ -347,7 +348,7 @@ export function HowItWorks() {
         <Section id="twice">
           <p>
             Usually each question appears once in a claim. When the same question is used twice,
-            there are two different things that could mean, and the Composer asks which you want.
+            there are two different things that could mean, and the simulator asks which you want.
           </p>
           <Table
             head={["Mode", "What happens", "If the question pays a portion r"]}
@@ -453,13 +454,21 @@ export function HowItWorks() {
 
         <Section id="demo">
           <p>
-            The Composer is a calculator. It works out the asset ID, the shares a deposit gives you,
-            the effect of splits and merges, and the payouts, all in your browser and with the same
-            rules as the on-chain program. It does not send transactions.
+            The <strong>Simulator</strong> page works out the asset ID, the positions a deposit
+            gives you, the effect of splits and merges, and the payouts, all in your browser and
+            with the same rules as the on-chain program. It draws your positions as a graph, from
+            the collateral down to each piece.
           </p>
           <p>
-            The wallet button connects to Solana devnet so that real deposits and redemptions can be
-            added as the program gains them.
+            It also includes a made-up market, so you can see what selling the pieces you do not
+            want, or buying more of the ones you do, would do to your result. That market is only
+            there for illustration: the protocol itself issues and settles positions, and leaves
+            trading to whatever venue wants to list them.
+          </p>
+          <p>
+            The <strong>Live</strong> page is for the real program on Solana devnet. It shows
+            whether the program is deployed and whether a wallet is connected, and will send real
+            transactions once it is.
           </p>
         </Section>
       </div>

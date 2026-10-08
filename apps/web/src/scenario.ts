@@ -21,6 +21,9 @@ export type DemoCondition = Readonly<{
   title: string;
   question: string;
   outcomes: readonly string[];
+  // For ordered ranges: the boundary between each result and the next, so that neighbouring
+  // results can be described as one range.
+  scale?: readonly string[];
   resolver: Address;
   questionId: Uint8Array;
   conditionId: Uint8Array;
@@ -80,7 +83,6 @@ export type Scenario = Readonly<{
   key: string;
   title: string;
   summary: string;
-  lookFor: string;
   collateral: Collateral;
   conditions: readonly DemoCondition[];
   factors: readonly Factor[];
@@ -88,7 +90,8 @@ export type Scenario = Readonly<{
   payouts: Readonly<Record<string, readonly string[]>>;
   resolution: string;
   deposit: string;
-  price: string;
+  // What the simulated market believes at the start: relative odds per result of each question.
+  odds: Readonly<Record<string, readonly number[]>>;
 }>;
 
 // Fixed byte patterns, not real accounts: the demo only derives identifiers.
@@ -107,8 +110,6 @@ export const SCENARIOS: readonly Scenario[] = [
     title: "Price range",
     summary:
       "One question about the SOL price, split into eight buckets. Any group of buckets is a single claim, so a market maker can sell a $125 to $200 range without anyone creating a new market for it.",
-    lookFor:
-      "In the split and merge panel, split your $125 to $200 claim into narrower ranges, as a market maker would before selling the middle one. Then merge the pieces back.",
     collateral: USDC,
     conditions: [
       defineCondition(
@@ -125,6 +126,7 @@ export const SCENARIOS: readonly Scenario[] = [
           "$225 to $250",
           "$250 or more",
         ],
+        ["$100", "$125", "$150", "$175", "$200", "$225", "$250"],
       ),
     ],
     factors: [{ conditionKey: "sol-price", indexSet: indexSetFromOutcomes([2, 3, 4]) }],
@@ -132,15 +134,13 @@ export const SCENARIOS: readonly Scenario[] = [
     payouts: { "sol-price": ["0", "0", "0", "1", "0", "0", "0", "0"] },
     resolution: "SOL settles at $162, inside the range.",
     deposit: "10000",
-    price: "0.40",
+    odds: { "sol-price": [5, 10, 14, 14, 12, 15, 15, 15] },
   },
   {
     key: "governance",
     title: "Governance and price",
     summary:
       "ABC is a made-up DAO token. Its holders split it by two independent questions: does the buyback proposal pass, and is SOL at $200 or more. The claim pays only if both happen, and it is backed by the DAO token itself instead of a stablecoin.",
-    lookFor:
-      "The example result gets one question right and the other wrong, so the claim pays nothing. Change the result in the last panel to see when it does pay.",
     collateral: { symbol: "ABC", mint: DEMO_ABC_MINT, decimals: 6 },
     conditions: [
       defineCondition(
@@ -162,15 +162,13 @@ export const SCENARIOS: readonly Scenario[] = [
     payouts: { buyback: ["1", "0"], "sol-level": ["0", "1"] },
     resolution: "The buyback is approved, but SOL finishes below $200.",
     deposit: "50000",
-    price: "0.25",
+    odds: { buyback: [1, 1], "sol-level": [1, 1] },
   },
   {
     key: "price-volatility",
     title: "Price and volatility",
     summary:
       "A price range claim that also depends on the volatility regime: it pays only if SOL finishes below $150 and volatility is high. Two different kinds of question are combined into one asset.",
-    lookFor:
-      "The example result splits the volatility question evenly, so the claim pays half. Pick a single volatility outcome in the last panel to see it pay in full or not at all.",
     collateral: USDC,
     conditions: [
       defineCondition(
@@ -178,6 +176,7 @@ export const SCENARIOS: readonly Scenario[] = [
         "SOL/USD at expiry",
         "SOL/USD at 16:00 UTC on 31 December 2026",
         ["below $125", "$125 to $150", "$150 to $200", "$200 or more"],
+        ["$125", "$150", "$200"],
       ),
       defineCondition(
         "volatility",
@@ -195,15 +194,13 @@ export const SCENARIOS: readonly Scenario[] = [
     resolution:
       "SOL settles at $140 and the volatility result is split evenly between high and low.",
     deposit: "100",
-    price: "0.30",
+    odds: { "sol-quartile": [20, 30, 30, 20], volatility: [3, 2] },
   },
   {
     key: "tournament",
     title: "Tournament winner",
     summary:
       "Eight teams, one winner. Early on, a broad claim on half the field is easy to price and trade. As the tournament narrows, the same shares can be cut into smaller groups and finally single teams, without anyone opening a new market.",
-    lookFor:
-      "In the split and merge panel, split your claim into two pairs of teams, then split one pair into single teams. Merge them back in any order and you return to exactly what you started with.",
     collateral: USDC,
     conditions: [
       defineCondition("winner", "Tournament winner", "Which team wins the final", [
@@ -222,15 +219,13 @@ export const SCENARIOS: readonly Scenario[] = [
     payouts: { winner: ["0", "1", "0", "0", "0", "0", "0", "0"] },
     resolution: "The Tigers win the final.",
     deposit: "1000",
-    price: "0.45",
+    odds: { winner: [15, 12, 10, 8, 20, 15, 12, 8] },
   },
   {
     key: "uptime-bond",
     title: "Uptime bond",
     summary:
       "An RPC provider posts a bond that pays its customer the square of the monthly downtime fraction, so the payout grows faster the worse the outage. The same selection is applied twice on purpose.",
-    lookFor:
-      "Switch the mode to Logical AND: the repeated selection collapses into one, and the payout changes from the downtime fraction squared to the fraction itself.",
     collateral: USDC,
     conditions: [
       defineCondition(
@@ -249,7 +244,7 @@ export const SCENARIOS: readonly Scenario[] = [
     resolution:
       "The service was down 25% of the month, reported as weight 1 on downtime and 3 on uptime: a quarter and three quarters.",
     deposit: "10000",
-    price: "0.05",
+    odds: { downtime: [1, 19] },
   },
 ];
 
@@ -258,13 +253,18 @@ export function defineCondition(
   title: string,
   question: string,
   outcomes: readonly string[],
+  scale?: readonly string[],
 ): DemoCondition {
+  if (scale && scale.length !== outcomes.length - 1) {
+    throw new RangeError("a scale has one boundary between each pair of results");
+  }
   const questionId = keccak_256(new TextEncoder().encode(JSON.stringify({ question, outcomes })));
   return {
     key,
     title,
     question,
     outcomes,
+    ...(scale ? { scale } : {}),
     resolver: DEMO_RESOLVER,
     questionId,
     conditionId: deriveConditionId(DEMO_RESOLVER, questionId, outcomes.length),
@@ -292,10 +292,83 @@ export function outcomesInIndexSet(indexSet: IndexSetWords, outcomeCount: number
   return outcomes;
 }
 
-export function describeSubset(condition: DemoCondition, indexSet: IndexSetWords): string {
-  return outcomesInIndexSet(indexSet, condition.outcomes.length)
-    .map((outcome) => condition.outcomes[outcome])
+function describeOutcomes(condition: DemoCondition, outcomes: readonly number[]): string {
+  const { scale } = condition;
+  if (!scale) return outcomes.map((outcome) => condition.outcomes[outcome]).join(" or ");
+  const last = condition.outcomes.length - 1;
+  const runs: [number, number][] = [];
+  for (const outcome of outcomes) {
+    const run = runs[runs.length - 1];
+    if (run && run[1] === outcome - 1) run[1] = outcome;
+    else runs.push([outcome, outcome]);
+  }
+  return runs
+    .map(([from, to]) =>
+      from === 0
+        ? `below ${scale[to]}`
+        : to === last
+          ? `${scale[from - 1]} or more`
+          : `${scale[from - 1]} to ${scale[to]}`,
+    )
     .join(" or ");
+}
+
+// Neighbouring ranges are joined, and a selection of most results is named by what it leaves out.
+export function describeSubset(condition: DemoCondition, indexSet: IndexSetWords): string {
+  const count = condition.outcomes.length;
+  const selected = outcomesInIndexSet(indexSet, count);
+  if (selected.length >= 3 && selected.length < count && selected.length > count / 2) {
+    const rest = condition.outcomes
+      .map((_, outcome) => outcome)
+      .filter((outcome) => !selected.includes(outcome));
+    return `anything except ${describeOutcomes(condition, rest)}`;
+  }
+  return describeOutcomes(condition, selected);
+}
+
+// The statement a position pays on, as a clause: "X is a, and Y is b".
+export function claimStatement(
+  conditions: readonly DemoCondition[],
+  factors: readonly ConditionClause[],
+): string {
+  return factors
+    .map((factor) => {
+      const condition = findCondition(conditions, factor.conditionId);
+      return `${condition.title} is ${describeSubset(condition, factor.indexSet)}`;
+    })
+    .join(", and ");
+}
+
+// One sentence saying when a share pays.
+export function explainClaim(
+  conditions: readonly DemoCondition[],
+  factors: readonly ConditionClause[],
+  symbol: string,
+): string {
+  const parts = factors.map((factor) => {
+    const condition = findCondition(conditions, factor.conditionId);
+    return `${condition.title} is ${describeSubset(condition, factor.indexSet)}`;
+  });
+  const repeated =
+    new Set(factors.map((factor) => toHex(factor.conditionId))).size < factors.length;
+  return repeated
+    ? `Each share pays up to 1 ${symbol}: the payout share of “${parts.join("” multiplied by that of “")}”. A question used more than once multiplies its own share.`
+    : `Each share pays 1 ${symbol} if ${parts.join(", and ")}. Otherwise it pays nothing. If a result is reported as shared, it pays that share.`;
+}
+
+// A question used twice multiplies; otherwise the selections simply all have to hold.
+export function describeClaim(
+  conditions: readonly DemoCondition[],
+  factors: readonly ConditionClause[],
+): string {
+  const ids = factors.map((factor) => toHex(factor.conditionId));
+  const joiner = new Set(ids).size < ids.length ? " × " : " and ";
+  return factors
+    .map(
+      (factor) =>
+        `(${describeSubset(findCondition(conditions, factor.conditionId), factor.indexSet)})`,
+    )
+    .join(joiner);
 }
 
 export function toHex(bytes: ReadonlyUint8Array): string {
@@ -407,18 +480,7 @@ export function holdingKey(factors: readonly ConditionClause[]): string {
   return toHex(constructionPath(factors).collectionId);
 }
 
-export function initialPortfolio(factors: readonly ConditionClause[], amount: bigint): Portfolio {
-  return {
-    collateral: 0n,
-    holdings: mintedSet(factors).map((claim) => ({
-      key: holdingKey(claim.factors),
-      factors: claim.factors,
-      amount,
-    })),
-  };
-}
-
-function adjust(
+export function adjustBalance(
   portfolio: Portfolio,
   factors: readonly ConditionClause[],
   change: bigint,
@@ -440,7 +502,7 @@ function adjust(
 
 // A full partition consumes the parent itself (or collateral at the root); a partial one
 // consumes the claim on the union of its pieces.
-function partitionSource(
+export function partitionSource(
   parent: readonly ConditionClause[],
   condition: ConditionRef,
   partition: readonly IndexSetWords[],
@@ -457,9 +519,9 @@ export function splitPosition(
   amount: bigint,
 ): Portfolio {
   if (amount <= 0n) throw new RangeError("amount must be greater than zero");
-  let next = adjust(portfolio, partitionSource(parent, condition, partition), -amount);
+  let next = adjustBalance(portfolio, partitionSource(parent, condition, partition), -amount);
   for (const indexSet of partition) {
-    next = adjust(next, [...parent, { ...condition, indexSet }], amount);
+    next = adjustBalance(next, [...parent, { ...condition, indexSet }], amount);
   }
   return next;
 }
@@ -474,9 +536,9 @@ export function mergePositions(
   if (amount <= 0n) throw new RangeError("amount must be greater than zero");
   let next = portfolio;
   for (const indexSet of partition) {
-    next = adjust(next, [...parent, { ...condition, indexSet }], -amount);
+    next = adjustBalance(next, [...parent, { ...condition, indexSet }], -amount);
   }
-  return adjust(next, partitionSource(parent, condition, partition), amount);
+  return adjustBalance(next, partitionSource(parent, condition, partition), amount);
 }
 
 // Two holdings merge when they differ in exactly one factor of the same condition and those
