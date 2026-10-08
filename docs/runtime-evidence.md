@@ -26,10 +26,14 @@ Measurements use the SBPF v3 program built with Solana 4.3.0 and executed by Lit
 | Transfer a batch of 2 positions           |        30,802 |
 | Transfer a batch of 8 positions           |        98,317 |
 | Transfer a batch of 16 positions          |       198,237 |
+| Redeem to a new residual balance          |        48,529 |
+| Redeem to an existing residual balance    |        58,266 |
+| Redeem a root position to collateral      |        42,301 |
+| Redeem a maximum-width payout             |        46,221 |
 
 The recorded atomic and nested fixtures each found a valid BN254 x-coordinate after one hash-to-curve attempt. The tests print current compute use and retry counts so changes remain visible.
 
-The local-validator suite executes condition preparation, BN254 collection registration, root collateral split/merge, grouped native refinement, single transfer and batch transfer through version 0, then another collection registration through version 1. It also submits all 256 payout numerators atomically through version 1 and submits the same arity through version 0 using three append transactions before atomic finalization.
+The local-validator suite executes condition preparation, BN254 collection registration, root collateral split/merge, grouped native refinement, single and batch transfer, residual redemption and collateral redemption through version 0, then another collection registration through version 1. It also submits all 256 payout numerators atomically through version 1 and submits the same arity through version 0 using three append transactions before atomic finalization.
 
 Root collateral split capacity was measured with every outcome represented by one position:
 
@@ -60,3 +64,5 @@ Native batch transfer was measured after recipient balances were initialized:
 |        16 |       50 |              140 |              1,930 |                  476 |
 
 Two and eight positions fit a static version-0 transaction. Sixteen positions fit version 0 with an address lookup table. Batch transfer is capped at sixteen positions; clients can submit additional complete batches. A single transfer can initialize its recipient balance atomically, including when that PDA was pre-funded with lamports. Batch callers initialize missing recipient balances with ordinary setup instructions before the value-moving transaction.
+
+One-factor residual redemption uses eight accounts and produced a 483-byte static version-0 transaction. Root redemption uses ten accounts and also fits version 0 without a lookup table. The runtime suite removes either factor from the same two-condition position, redeems repeated factors one at a time, exercises zero-paying claims, and checks SPL Token and Token-2022 collateral payouts. The maximum-width case computes the 136-bit product on-chain and returns `u64::MAX - 1`, leaving one registered collateral unit in the vault.

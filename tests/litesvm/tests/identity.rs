@@ -22,7 +22,7 @@ use cc_token::{
             BatchTransferPositionsArgs, NativePositionArgs, RootCollateralArgs,
             TransferPositionArgs,
         },
-        settlement::ReportPayoutsArgs,
+        settlement::{RedeemPositionArgs, ReportPayoutsArgs},
         setup::PrepareConditionArgs,
     },
     math::IndexSet,
@@ -668,6 +668,69 @@ fn batch_transfer_positions_instruction(
             args: BatchTransferPositionsArgs { amounts },
         }
         .data(),
+    }
+}
+
+fn redeem_position_instruction(
+    owner: Address,
+    mint: Address,
+    parent_collection_id: [u8; 32],
+    args: RedeemPositionArgs,
+) -> Instruction {
+    let source_collection_id = derive_collection_id(
+        parent_collection_id,
+        args.condition_id,
+        args.index_set,
+    )
+    .unwrap()
+    .collection_id;
+    let source_position_id = derive_position_id(&mint, source_collection_id).unwrap();
+    let destination_position_id = derive_position_id(&mint, parent_collection_id).unwrap();
+    Instruction {
+        program_id: ID,
+        accounts: accounts::RedeemPosition {
+            owner,
+            condition: condition_address(args.condition_id),
+            parent_collection: collection_address(parent_collection_id),
+            source_position: position_address(source_position_id),
+            source_balance: balance_address(owner, source_position_id),
+            destination_position: position_address(destination_position_id),
+            destination_balance: balance_address(owner, destination_position_id),
+            system_program: System::id(),
+        }
+        .to_account_metas(None),
+        data: instruction::RedeemPosition { args }.data(),
+    }
+}
+
+fn redeem_to_collateral_instruction(
+    owner: Address,
+    owner_destination: Address,
+    mint: Address,
+    token_program: Address,
+    args: RedeemPositionArgs,
+) -> Instruction {
+    let source_collection_id =
+        derive_collection_id(ROOT_COLLECTION_ID, args.condition_id, args.index_set)
+            .unwrap()
+            .collection_id;
+    let source_position_id = derive_position_id(&mint, source_collection_id).unwrap();
+    Instruction {
+        program_id: ID,
+        accounts: accounts::RedeemToCollateral {
+            owner,
+            owner_destination,
+            mint,
+            collateral_config: collateral_config_address(mint),
+            vault_authority: vault_authority_address(mint),
+            vault: vault_address(mint, token_program),
+            condition: condition_address(args.condition_id),
+            source_position: position_address(source_position_id),
+            source_balance: balance_address(owner, source_position_id),
+            token_program,
+        }
+        .to_account_metas(None),
+        data: instruction::RedeemToCollateral { args }.data(),
     }
 }
 
@@ -2321,6 +2384,641 @@ fn invalid_batch_transfers_roll_back_every_entry() {
     }));
     assert_eq!(context.token_amount(owner_account), 0);
     assert_eq!(context.token_amount(vault_address(mint, token_program)), 10);
+}
+
+#[test]
+fn redemption_removes_distinct_factors_in_either_order() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let token_program = anchor_spl::token::ID;
+    let (mint, owner_account) = context.create_funded_collateral(token_program, 300);
+    context
+        .send(
+            register_collateral_instruction(payer, mint, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let first_condition = condition_args(payer, [201; 32], 2);
+    let second_condition = condition_args(payer, [202; 32], 2);
+    for condition in [&first_condition, &second_condition] {
+        context
+            .send(
+                prepare_condition_instruction(payer, condition.clone()),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+    }
+    let selected = index_set(&[0]);
+    let complement = index_set(&[1]);
+    let (first_collection, first_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        first_condition.condition_id,
+        selected,
+    );
+    prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        first_condition.condition_id,
+        complement,
+    );
+    context
+        .send(
+            split_from_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RootCollateralArgs {
+                    condition_id: first_condition.condition_id,
+                    partition: vec![selected, complement],
+                    amount: 300,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let (combined_collection, combined_position) = prepare_position(
+        &mut context,
+        mint,
+        first_collection,
+        second_condition.condition_id,
+        selected,
+    );
+    prepare_position(
+        &mut context,
+        mint,
+        first_collection,
+        second_condition.condition_id,
+        complement,
+    );
+    context
+        .send(
+            split_position_instruction(
+                payer,
+                mint,
+                first_collection,
+                NativePositionArgs {
+                    parent_collection_id: first_collection,
+                    condition_id: second_condition.condition_id,
+                    partition: vec![selected, complement],
+                    amount: 300,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let (second_collection, second_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        second_condition.condition_id,
+        selected,
+    );
+    context
+        .send(
+            close_balance_instruction(
+                payer,
+                second_position,
+                balance_address(payer, second_position),
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    context
+        .send(
+            report_payouts_instruction(payer, first_condition.condition_id, vec![1, 1]),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let first_residual_instruction = redeem_position_instruction(
+        payer,
+        mint,
+        second_collection,
+        RedeemPositionArgs {
+            condition_id: first_condition.condition_id,
+            index_set: selected,
+            amount: 100,
+        },
+    );
+    let residual_transaction_bytes =
+        context.transaction_size(first_residual_instruction.clone(), TransactionVersion::V0);
+    let first_residual = context
+        .send(first_residual_instruction, TransactionVersion::V0)
+        .unwrap();
+    assert_eq!(context.balance(payer, combined_position).amount, 200);
+    assert_eq!(context.balance(payer, second_position).amount, 50);
+    let existing_residual = context
+        .send(
+            redeem_position_instruction(
+                payer,
+                mint,
+                second_collection,
+                RedeemPositionArgs {
+                    condition_id: first_condition.condition_id,
+                    index_set: selected,
+                    amount: 100,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, combined_position).amount, 100);
+    assert_eq!(context.balance(payer, second_position).amount, 100);
+    context
+        .send(
+            report_payouts_instruction(payer, second_condition.condition_id, vec![1, 1]),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let first_collateral = context
+        .send(
+            redeem_to_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RedeemPositionArgs {
+                    condition_id: second_condition.condition_id,
+                    index_set: selected,
+                    amount: 100,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    context
+        .send(
+            redeem_position_instruction(
+                payer,
+                mint,
+                first_collection,
+                RedeemPositionArgs {
+                    condition_id: second_condition.condition_id,
+                    index_set: selected,
+                    amount: 100,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, combined_position).amount, 0);
+    assert_eq!(context.balance(payer, first_position).amount, 50);
+    context
+        .send(
+            redeem_to_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RedeemPositionArgs {
+                    condition_id: first_condition.condition_id,
+                    index_set: selected,
+                    amount: 50,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    assert_eq!(combined_collection, derive_collection_id(second_collection, first_condition.condition_id, selected).unwrap().collection_id);
+    assert_eq!(context.balance(payer, first_position).amount, 0);
+    assert_eq!(context.balance(payer, second_position).amount, 0);
+    assert_eq!(context.token_amount(owner_account), 75);
+    assert_eq!(context.token_amount(vault_address(mint, token_program)), 225);
+    assert_within_transaction_limit(&first_residual);
+    assert_within_transaction_limit(&first_collateral);
+    println!(
+        "redeem_position transaction_bytes={residual_transaction_bytes} first_use_cu={} existing_cu={} redeem_to_collateral_cu={}",
+        first_residual.compute_units_consumed,
+        existing_residual.compute_units_consumed,
+        first_collateral.compute_units_consumed
+    );
+}
+
+#[test]
+fn redemption_preserves_multiplicity_and_bounds_each_rounding_step() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let token_program = anchor_spl::token::ID;
+    let (mint, owner_account) = context.create_funded_collateral(token_program, 100);
+    context
+        .send(
+            register_collateral_instruction(payer, mint, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let condition = condition_args(payer, [203; 32], 2);
+    context
+        .send(
+            prepare_condition_instruction(payer, condition.clone()),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let selected = index_set(&[0]);
+    let complement = index_set(&[1]);
+    let (parent_collection, parent_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        selected,
+    );
+    prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        complement,
+    );
+    context
+        .send(
+            split_from_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RootCollateralArgs {
+                    condition_id: condition.condition_id,
+                    partition: vec![selected, complement],
+                    amount: 100,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let (_, repeated_position) = prepare_position(
+        &mut context,
+        mint,
+        parent_collection,
+        condition.condition_id,
+        selected,
+    );
+    prepare_position(
+        &mut context,
+        mint,
+        parent_collection,
+        condition.condition_id,
+        complement,
+    );
+    context
+        .send(
+            split_position_instruction(
+                payer,
+                mint,
+                parent_collection,
+                NativePositionArgs {
+                    parent_collection_id: parent_collection,
+                    condition_id: condition.condition_id,
+                    partition: vec![selected, complement],
+                    amount: 100,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    context
+        .send(
+            report_payouts_instruction(payer, condition.condition_id, vec![1, 2]),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let parent_balance_address = balance_address(payer, parent_position);
+    let mut parent_account = context.svm.get_account(&parent_balance_address).unwrap();
+    let mut parent_balance: PositionBalance = deserialize_account(&parent_account.data);
+    parent_balance.amount = u64::MAX;
+    parent_account.data = serialize_account(&parent_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(parent_balance_address, parent_account.clone())
+        .unwrap();
+    assert!(context
+        .send(
+            redeem_position_instruction(
+                payer,
+                mint,
+                parent_collection,
+                RedeemPositionArgs {
+                    condition_id: condition.condition_id,
+                    index_set: selected,
+                    amount: 3,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert_eq!(context.balance(payer, repeated_position).amount, 100);
+    parent_balance.amount = 0;
+    parent_account.data = serialize_account(&parent_balance, PositionBalance::SPACE);
+    context
+        .svm
+        .set_account(parent_balance_address, parent_account)
+        .unwrap();
+
+    context
+        .send(
+            redeem_position_instruction(
+                payer,
+                mint,
+                parent_collection,
+                RedeemPositionArgs {
+                    condition_id: condition.condition_id,
+                    index_set: selected,
+                    amount: 100,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, repeated_position).amount, 0);
+    assert_eq!(context.balance(payer, parent_position).amount, 33);
+    let remainder = 100u128 - 33u128 * 3;
+    assert!(remainder < 3);
+
+    context
+        .send(
+            redeem_to_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RedeemPositionArgs {
+                    condition_id: condition.condition_id,
+                    index_set: selected,
+                    amount: 33,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, parent_position).amount, 0);
+    assert_eq!(context.token_amount(owner_account), 11);
+    assert_eq!(context.token_amount(vault_address(mint, token_program)), 89);
+}
+
+#[test]
+fn root_redemption_supports_zero_payouts_and_both_token_programs() {
+    for token_program in [anchor_spl::token::ID, anchor_spl::token_2022::ID] {
+        let mut context = TestContext::new();
+        let payer = context.payer.pubkey();
+        let (mint, owner_account) = context.create_funded_collateral(token_program, 20);
+        context
+            .send(
+                register_collateral_instruction(payer, mint, token_program),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+        let (condition, partition, position_ids) =
+            prepare_root_positions(&mut context, mint, 2, payer);
+        context
+            .send(
+                split_from_collateral_instruction(
+                    payer,
+                    owner_account,
+                    mint,
+                    token_program,
+                    RootCollateralArgs {
+                        condition_id: condition.condition_id,
+                        partition: partition.clone(),
+                        amount: 20,
+                    },
+                ),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+        context
+            .send(
+                report_payouts_instruction(payer, condition.condition_id, vec![0, 1]),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+
+        context
+            .send(
+                redeem_to_collateral_instruction(
+                    payer,
+                    owner_account,
+                    mint,
+                    token_program,
+                    RedeemPositionArgs {
+                        condition_id: condition.condition_id,
+                        index_set: partition[0],
+                        amount: 20,
+                    },
+                ),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+        assert_eq!(context.balance(payer, position_ids[0]).amount, 0);
+        assert_eq!(context.token_amount(owner_account), 0);
+        assert_eq!(context.token_amount(vault_address(mint, token_program)), 20);
+
+        let winning = context
+            .send(
+                redeem_to_collateral_instruction(
+                    payer,
+                    owner_account,
+                    mint,
+                    token_program,
+                    RedeemPositionArgs {
+                        condition_id: condition.condition_id,
+                        index_set: partition[1],
+                        amount: 20,
+                    },
+                ),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+        assert_eq!(context.balance(payer, position_ids[1]).amount, 0);
+        assert_eq!(context.token_amount(owner_account), 20);
+        assert_eq!(context.token_amount(vault_address(mint, token_program)), 0);
+        assert_within_transaction_limit(&winning);
+        println!(
+            "redeem_to_collateral token_program={token_program} compute_units={}",
+            winning.compute_units_consumed
+        );
+    }
+}
+
+#[test]
+fn redemption_executes_the_maximum_width_payout_at_runtime() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let token_program = anchor_spl::token::ID;
+    let (mint, owner_account) = context.create_funded_collateral(token_program, u64::MAX);
+    context
+        .send(
+            register_collateral_instruction(payer, mint, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let condition = condition_args(payer, [204; 32], 256);
+    context
+        .send(
+            prepare_condition_instruction(payer, condition.clone()),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let selected = IndexSet {
+        words: [u64::MAX, u64::MAX, u64::MAX, u64::MAX >> 1],
+    };
+    let complement = index_set(&[255]);
+    let (_, selected_position) = prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        selected,
+    );
+    prepare_position(
+        &mut context,
+        mint,
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        complement,
+    );
+    context
+        .send(
+            split_from_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RootCollateralArgs {
+                    condition_id: condition.condition_id,
+                    partition: vec![selected, complement],
+                    amount: u64::MAX,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let mut payout_numerators = vec![u64::MAX; 255];
+    payout_numerators.push(1);
+    context
+        .send(
+            report_payouts_instruction(payer, condition.condition_id, payout_numerators),
+            TransactionVersion::V1,
+        )
+        .unwrap();
+
+    let metadata = context
+        .send(
+            redeem_to_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RedeemPositionArgs {
+                    condition_id: condition.condition_id,
+                    index_set: selected,
+                    amount: u64::MAX,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, selected_position).amount, 0);
+    assert_eq!(context.token_amount(owner_account), u64::MAX - 1);
+    assert_eq!(context.token_amount(vault_address(mint, token_program)), 1);
+    assert_within_transaction_limit(&metadata);
+    println!(
+        "redeem_to_collateral maximum_width_compute_units={}",
+        metadata.compute_units_consumed
+    );
+}
+
+#[test]
+fn invalid_redemptions_leave_source_and_collateral_unchanged() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let token_program = anchor_spl::token::ID;
+    let mint = context.create_mint(token_program, Some(payer));
+    let owner_account =
+        CreateAssociatedTokenAccount::new(&mut context.svm, &context.payer, &mint)
+            .token_program_id(&token_program)
+            .send()
+            .unwrap();
+    MintTo::new(
+        &mut context.svm,
+        &context.payer,
+        &mint,
+        &owner_account,
+        20,
+    )
+    .token_program_id(&token_program)
+    .send()
+    .unwrap();
+    context
+        .send(
+            register_collateral_instruction(payer, mint, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let (condition, partition, position_ids) = prepare_root_positions(&mut context, mint, 2, payer);
+    context
+        .send(
+            split_from_collateral_instruction(
+                payer,
+                owner_account,
+                mint,
+                token_program,
+                RootCollateralArgs {
+                    condition_id: condition.condition_id,
+                    partition: partition.clone(),
+                    amount: 20,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let redeem = |amount| {
+        redeem_to_collateral_instruction(
+            payer,
+            owner_account,
+            mint,
+            token_program,
+            RedeemPositionArgs {
+                condition_id: condition.condition_id,
+                index_set: partition[0],
+                amount,
+            },
+        )
+    };
+    assert!(context.send(redeem(1), TransactionVersion::V0).is_err());
+    context
+        .send(
+            report_payouts_instruction(payer, condition.condition_id, vec![1, 1]),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert!(context.send(redeem(21), TransactionVersion::V0).is_err());
+
+    let mut wrong_source = redeem(1);
+    wrong_source.accounts[7] = AccountMeta::new_readonly(position_address(position_ids[1]), false);
+    wrong_source.accounts[8] = AccountMeta::new(balance_address(payer, position_ids[1]), false);
+    assert!(context
+        .send(wrong_source, TransactionVersion::V0)
+        .is_err());
+
+    FreezeAccount::new(&mut context.svm, &context.payer, &mint)
+        .token_program_id(&token_program)
+        .send()
+        .unwrap();
+    assert!(context.send(redeem(10), TransactionVersion::V0).is_err());
+    assert_eq!(context.balance(payer, position_ids[0]).amount, 20);
+    assert_eq!(context.balance(payer, position_ids[1]).amount, 20);
+    assert_eq!(context.token_amount(owner_account), 0);
+    assert_eq!(context.token_amount(vault_address(mint, token_program)), 20);
 }
 
 #[test]

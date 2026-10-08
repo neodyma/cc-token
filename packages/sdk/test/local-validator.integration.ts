@@ -61,6 +61,8 @@ import {
   getRegisterCollateralInstructionAsync,
   getRegisterCollectionInstruction,
   getRegisterPositionForCollectionInstruction,
+  getRedeemNativePositionInstruction,
+  getRedeemRootCollateralInstruction,
   getRootCollateralSetupInstructions,
   getReportPayoutsInstruction,
   getVaultAuthorityAddress,
@@ -132,7 +134,7 @@ async function fund(address: Address): Promise<void> {
   throw new Error("airdrop was not observed");
 }
 
-test("generated client submits identity and resolution instructions through v0 and v1", async () => {
+test("generated client submits the native lifecycle through v0 and v1", async () => {
   const payer = await generateKeyPairSigner();
   await fund(payer.address);
 
@@ -461,7 +463,114 @@ test("generated client submits identity and resolution instructions through v0 a
     assert.equal(recipientBalance.exists && recipientBalance.account.data.amount, 0n);
   }
 
-  await sendInstruction(payer, await getMergeRootCollateralInstruction(rootInput), v0Only);
+  const redemptionQuestionId = new Uint8Array(32).fill(18);
+  const redemptionConditionId = deriveConditionId(payer.address, redemptionQuestionId, 2);
+  const [redemptionConditionAddress] = await getConditionAddress(redemptionConditionId);
+  await sendInstruction(
+    payer,
+    getPrepareConditionInstruction({
+      payer,
+      condition: redemptionConditionAddress,
+      conditionId: redemptionConditionId,
+      resolver: payer.address,
+      questionId: redemptionQuestionId,
+      outcomeCount: 2,
+    }),
+    v0Only,
+  );
+  const redemptionPartition = [
+    [1n, 0n, 0n, 0n],
+    [2n, 0n, 0n, 0n],
+  ] as const;
+  const redemptionSetup = await getNativePositionSetupInstructions({
+    payer,
+    owner: payer.address,
+    collateralMint: mint.address,
+    parentCollectionId: groupedCollectionId,
+    conditionId: redemptionConditionId,
+    outcomeCount: 2,
+    partition: redemptionPartition,
+  });
+  for (const instruction of redemptionSetup) {
+    await sendInstruction(payer, instruction, v0Only);
+  }
+  await sendInstruction(
+    payer,
+    await getSplitNativePositionInstruction({
+      owner: payer,
+      collateralMint: mint.address,
+      parentCollectionId: groupedCollectionId,
+      conditionId: redemptionConditionId,
+      outcomeCount: 2,
+      partition: redemptionPartition,
+      amount: 100n,
+    }),
+    v0Only,
+  );
+  await sendInstruction(
+    payer,
+    getReportPayoutsInstruction({
+      resolver: payer,
+      condition: redemptionConditionAddress,
+      payoutNumerators: [1n, 1n],
+    }),
+    v0Only,
+  );
+  for (const indexSet of redemptionPartition) {
+    await sendInstruction(
+      payer,
+      await getRedeemNativePositionInstruction({
+        owner: payer,
+        collateralMint: mint.address,
+        parentCollectionId: groupedCollectionId,
+        conditionId: redemptionConditionId,
+        outcomeCount: 2,
+        indexSet,
+        amount: 100n,
+      }),
+      v0Only,
+    );
+  }
+  const redeemedGroupedBalance = await fetchVerifiedPositionBalance(
+    rpc,
+    payer.address,
+    groupedPositionId,
+  );
+  assert.equal(redeemedGroupedBalance.exists && redeemedGroupedBalance.account.data.amount, 300n);
+
+  await sendInstruction(
+    payer,
+    getReportPayoutsInstruction({
+      resolver: payer,
+      condition: conditionAddress,
+      payoutNumerators: Array<bigint>(8).fill(1n),
+    }),
+    v0Only,
+  );
+  for (let index = 0; index < rootPartition.length; index += 1) {
+    await sendInstruction(
+      payer,
+      await getRedeemRootCollateralInstruction({
+        owner: payer,
+        ownerTokenAccount,
+        collateralMint: mint.address,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        conditionId,
+        outcomeCount: 8,
+        indexSet: rootPartition[index]!,
+        amount: 100n,
+      }),
+      v0Only,
+    );
+  }
+  assert.equal((await fetchToken(rpc, ownerTokenAccount)).data.amount, 800n);
+  assert.equal((await fetchToken(rpc, config.data.vault)).data.amount, 200n);
+
+  await sendInstruction(
+    payer,
+    await getMergeRootCollateralInstruction({ ...rootInput, amount: 200n }),
+    v0Only,
+  );
   assert.equal((await fetchToken(rpc, ownerTokenAccount)).data.amount, 1_000n);
   assert.equal((await fetchToken(rpc, config.data.vault)).data.amount, 0n);
   const openBalance = await fetchVerifiedPositionBalance(rpc, payer.address, positionId);

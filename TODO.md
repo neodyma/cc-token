@@ -66,12 +66,12 @@
 - [x] Maximum-width and 136-bit arithmetic tests
 - [x] Resolver-authorized payout reporting
 - [x] Immutable final resolution
-- [ ] One-factor redemption
-- [ ] Redemption to a residual position
-- [ ] Redemption to collateral
-- [ ] Repeated-factor redemption
+- [x] One-factor redemption
+- [x] Redemption to a residual position
+- [x] Redemption to collateral
+- [x] Repeated-factor redemption
 - [x] Fractional, zero-paying and one-hot resolution tests
-- [ ] Runtime proof of the one-unit-per-step rounding bound
+- [x] Runtime proof of the one-unit-per-step rounding bound
 - [x] Full 256-entry report through transaction v1
 - [x] Transaction v0-compatible fallback flow where required
 
