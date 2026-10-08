@@ -9,16 +9,27 @@ import {
   DefinitionVerificationError,
   deriveCollectionId,
   deriveConditionId,
+  derivePositionId,
   getCollectionAddress,
   getCollectionDefinitionDiscriminatorBytes,
   getConditionAddress,
   getConditionDiscriminatorBytes,
+  getPositionAddress,
+  getPositionBalanceAddress,
+  getPositionBalanceDiscriminatorBytes,
+  getPositionDefinitionDiscriminatorBytes,
   ROOT_COLLECTION_ID,
   verifyCollectionAccount,
   verifyConditionAccount,
+  verifyPositionAccount,
+  verifyPositionBalanceAccount,
   type CollectionDefinition,
   type Condition,
   type IndexSetWords,
+  type PositionBalance,
+  type PositionDefinition,
+  type VerifiedCollateral,
+  type VerifiedCollection,
 } from "../src/index.ts";
 
 const resolver = address("11111111111111111111111111111111");
@@ -180,6 +191,70 @@ test("rejects malformed collection witnesses", async () => {
   await assert.rejects(
     () => verifyCollectionAccount(collection, wrongCondition),
     hasCode("invalid_witness"),
+  );
+});
+
+test("verifies position definitions and open zero balances", async () => {
+  const owner = address("Vote111111111111111111111111111111111111111");
+  const collateralMint = address("So11111111111111111111111111111111111111112");
+  const condition = await conditionAccount(2);
+  const collection = await collectionAccount(condition, ROOT_COLLECTION_ID, [1n, 0n, 0n, 0n]);
+  const positionId = derivePositionId(collateralMint, collection.data.collectionId);
+  const [positionAddress, positionBump] = await getPositionAddress(positionId);
+  const position: Account<PositionDefinition> = {
+    address: positionAddress,
+    data: {
+      discriminator: getPositionDefinitionDiscriminatorBytes(),
+      version: 1,
+      positionId,
+      collateralMint,
+      collectionId: collection.data.collectionId,
+      bump: positionBump,
+    },
+    executable: false,
+    lamports: lamports(1n),
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    space: 0n,
+  };
+  const collateral = {
+    config: { data: { mint: collateralMint } },
+  } as unknown as VerifiedCollateral;
+  const verifiedCollection: VerifiedCollection = {
+    collectionId: collection.data.collectionId,
+    constructionPath: [{ collection, condition }],
+    factors: [],
+  };
+  assert.equal(await verifyPositionAccount(position, collateral, verifiedCollection), position);
+
+  const [balanceAddress, balanceBump] = await getPositionBalanceAddress(owner, positionId);
+  const balance: Account<PositionBalance> = {
+    address: balanceAddress,
+    data: {
+      discriminator: getPositionBalanceDiscriminatorBytes(),
+      version: 1,
+      owner,
+      positionId,
+      amount: 0n,
+      bump: balanceBump,
+    },
+    executable: false,
+    lamports: lamports(1n),
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    space: 0n,
+  };
+  assert.equal(await verifyPositionBalanceAccount(balance, owner, position), balance);
+  await assert.rejects(
+    () =>
+      verifyPositionBalanceAccount(
+        { ...balance, data: { ...balance.data, owner: resolver } },
+        owner,
+        position,
+      ),
+    hasCode("invalid_identity"),
+  );
+  await assert.rejects(
+    () => verifyPositionAccount({ ...position, address: owner }, collateral, verifiedCollection),
+    hasCode("invalid_pda"),
   );
 });
 

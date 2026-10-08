@@ -44,7 +44,7 @@
 - [x] `PositionBalance`
 - [x] Balance initialization
 - [x] Zero-balance closure and reopening
-- [ ] SDK retrieval and verification for every definition
+- [x] SDK retrieval and verification for every definition
 - [x] Runtime tests for the complete lifecycle
 
 ## 4. Native position operations
@@ -113,7 +113,7 @@
 - [x] Position derivation
 - [x] Partition and payout helpers
 - [x] Transaction-version selection
-- [ ] Complete definition retrieval (condition and collection retrieval and verification is implemented)
+- [x] Complete definition retrieval
 - [ ] Balance discovery across representations
 - [x] Logical subset normalization
 - [x] Explicit repeated-factor construction

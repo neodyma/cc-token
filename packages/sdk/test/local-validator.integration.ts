@@ -29,6 +29,7 @@ import {
 import {
   deriveCollectionId,
   deriveConditionId,
+  derivePositionId,
   CC_TOKEN_PROGRAM_ADDRESS,
   DefinitionVerificationError,
   fetchCollateralConfig,
@@ -38,17 +39,22 @@ import {
   fetchPayoutReport,
   fetchVerifiedCollection,
   fetchVerifiedCondition,
+  fetchVerifiedPosition,
+  fetchVerifiedPositionBalance,
   findConfigPda,
   findVaultAuthorityPda,
   getAppendPayoutReportInstruction,
   getCollectionAddress,
+  getClosePositionBalanceInstruction,
   getConditionAddress,
   getFinalizePayoutReportInstruction,
+  getInitializePositionBalanceInstruction,
   getInitializePayoutReportInstruction,
   getPayoutReportAddress,
   getPrepareConditionInstruction,
   getRegisterCollateralInstructionAsync,
   getRegisterCollectionInstruction,
+  getRegisterPositionForCollectionInstruction,
   getReportPayoutsInstruction,
   planPayoutReport,
   ROOT_COLLECTION_ID,
@@ -200,6 +206,51 @@ test("generated client submits identity and resolution instructions through v0 a
   assert.deepEqual(collection.data.collectionId, collectionId);
   assert.deepEqual(collection.data.conditionId, conditionId);
   assert.deepEqual(collection.data.indexSet.words, [...indexSet]);
+
+  const positionId = derivePositionId(mint.address, collectionId);
+  await sendInstruction(
+    payer,
+    await getRegisterPositionForCollectionInstruction({
+      payer,
+      collateralMint: mint.address,
+      collectionId,
+    }),
+    v0Only,
+  );
+  const verifiedPosition = await fetchVerifiedPosition(rpc, mint.address, collectionId);
+  assert.deepEqual(verifiedPosition.position.data.positionId, positionId);
+  assert.equal(verifiedPosition.position.data.collateralMint, mint.address);
+  assert.deepEqual(verifiedPosition.position.data.collectionId, collectionId);
+
+  await sendInstruction(
+    payer,
+    await getInitializePositionBalanceInstruction({
+      payer,
+      owner: payer.address,
+      positionId,
+    }),
+    v0Only,
+  );
+  const openBalance = await fetchVerifiedPositionBalance(rpc, payer.address, positionId);
+  assert.equal(openBalance.exists, true);
+  if (!openBalance.exists) throw new Error("expected an open native position balance");
+  assert.equal(openBalance.account.data.amount, 0n);
+
+  await sendInstruction(
+    payer,
+    await getClosePositionBalanceInstruction({ owner: payer, positionId }),
+    v0Only,
+  );
+  assert.equal((await fetchVerifiedPositionBalance(rpc, payer.address, positionId)).exists, false);
+  await sendInstruction(
+    payer,
+    await getInitializePositionBalanceInstruction({
+      payer,
+      owner: payer.address,
+      positionId,
+    }),
+    v0Only,
+  );
 
   const v1IndexSet = [4n, 0n, 0n, 0n] as const;
   const v1CollectionId = deriveCollectionId(

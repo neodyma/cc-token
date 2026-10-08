@@ -16,6 +16,10 @@ const POSITION_DOMAIN = new TextEncoder().encode("SVM_CTF_POSITION_V1");
 const CONDITION_SEED = new TextEncoder().encode("condition");
 const COLLECTION_SEED = new TextEncoder().encode("collection");
 const PAYOUT_REPORT_SEED = new TextEncoder().encode("payout_report");
+const COLLATERAL_SEED = new TextEncoder().encode("collateral");
+const VAULT_SEED = new TextEncoder().encode("vault");
+const POSITION_SEED = new TextEncoder().encode("position");
+const BALANCE_SEED = new TextEncoder().encode("balance");
 
 export const ROOT_COLLECTION_ID = new Uint8Array(32);
 
@@ -113,6 +117,39 @@ export function getPayoutReportAddress(
   return getProgramDerivedAddress({
     programAddress: CC_TOKEN_PROGRAM_ADDRESS,
     seeds: [PAYOUT_REPORT_SEED, conditionId],
+  });
+}
+
+export function getCollateralAddress(mint: Address): Promise<ProgramDerivedAddress> {
+  return getProgramDerivedAddress({
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    seeds: [COLLATERAL_SEED, getAddressEncoder().encode(mint)],
+  });
+}
+
+export function getVaultAuthorityAddress(mint: Address): Promise<ProgramDerivedAddress> {
+  return getProgramDerivedAddress({
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    seeds: [VAULT_SEED, getAddressEncoder().encode(mint)],
+  });
+}
+
+export function getPositionAddress(positionId: ReadonlyUint8Array): Promise<ProgramDerivedAddress> {
+  assertIdentifier(positionId, "positionId");
+  return getProgramDerivedAddress({
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    seeds: [POSITION_SEED, positionId],
+  });
+}
+
+export function getPositionBalanceAddress(
+  owner: Address,
+  positionId: ReadonlyUint8Array,
+): Promise<ProgramDerivedAddress> {
+  assertIdentifier(positionId, "positionId");
+  return getProgramDerivedAddress({
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    seeds: [BALANCE_SEED, getAddressEncoder().encode(owner), positionId],
   });
 }
 
