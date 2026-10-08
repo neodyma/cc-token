@@ -18,3 +18,11 @@ pub struct CollectionRegistered {
     pub index_set: IndexSet,
     pub hash_attempts: u32,
 }
+
+#[event]
+pub struct PayoutsReported {
+    pub condition_id: [u8; 32],
+    pub resolver: Pubkey,
+    pub outcome_count: u16,
+    pub payout_denominator: u128,
+}

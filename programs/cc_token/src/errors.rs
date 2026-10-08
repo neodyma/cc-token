@@ -44,4 +44,18 @@ pub enum CcTokenError {
     IdentityPoint,
     #[msg("Collection account does not match its registered definition")]
     CollectionMismatch,
+    #[msg("Only the condition resolver may report payouts")]
+    UnauthorizedResolver,
+    #[msg("Condition payouts have already been reported")]
+    ConditionAlreadyResolved,
+    #[msg("Payout numerator count must equal the condition outcome count")]
+    PayoutNumeratorCountMismatch,
+    #[msg("A payout report chunk must contain at least one numerator")]
+    EmptyPayoutChunk,
+    #[msg("Payout report contains more numerators than the condition")]
+    PayoutReportTooLong,
+    #[msg("Payout report does not contain every condition outcome")]
+    IncompletePayoutReport,
+    #[msg("Payout report does not match its condition")]
+    PayoutReportMismatch,
 }

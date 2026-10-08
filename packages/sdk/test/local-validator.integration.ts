@@ -25,10 +25,18 @@ import {
   deriveConditionId,
   fetchCollectionDefinition,
   fetchCondition,
+  fetchMaybePayoutReport,
+  fetchPayoutReport,
+  getAppendPayoutReportInstruction,
   getCollectionAddress,
   getConditionAddress,
+  getFinalizePayoutReportInstruction,
+  getInitializePayoutReportInstruction,
+  getPayoutReportAddress,
   getPrepareConditionInstruction,
   getRegisterCollectionInstruction,
+  getReportPayoutsInstruction,
+  planPayoutReport,
   ROOT_COLLECTION_ID,
   selectTransactionVersion,
   type CcTokenTransactionVersion,
@@ -84,7 +92,7 @@ async function fund(address: Address): Promise<void> {
   throw new Error("airdrop was not observed");
 }
 
-test("generated client submits v0 and optional v1 identity instructions", async () => {
+test("generated client submits identity and resolution instructions through v0 and v1", async () => {
   const payer = await generateKeyPairSigner();
   await fund(payer.address);
 
@@ -150,4 +158,101 @@ test("generated client submits v0 and optional v1 identity instructions", async 
     (await fetchCollectionDefinition(rpc, v1CollectionAddress)).data.collectionId,
     v1CollectionId,
   );
+
+  const directQuestionId = new Uint8Array(32).fill(23);
+  const directConditionId = deriveConditionId(payer.address, directQuestionId, 256);
+  const [directConditionAddress] = await getConditionAddress(directConditionId);
+  await sendInstruction(
+    payer,
+    getPrepareConditionInstruction({
+      payer,
+      condition: directConditionAddress,
+      conditionId: directConditionId,
+      resolver: payer.address,
+      questionId: directQuestionId,
+      outcomeCount: 256,
+    }),
+    v0Only,
+  );
+  const directPayouts = Array<bigint>(256).fill(0n);
+  directPayouts[127] = 1n;
+  const directPlan = planPayoutReport(directPayouts, v1Capable);
+  assert.equal(directPlan.kind, "direct");
+  await sendInstruction(
+    payer,
+    getReportPayoutsInstruction({
+      resolver: payer,
+      condition: directConditionAddress,
+      payoutNumerators: [...directPlan.payoutNumerators],
+    }),
+    v1Capable,
+  );
+  const directCondition = await fetchCondition(rpc, directConditionAddress);
+  assert.equal(directCondition.data.status, 1);
+  assert.equal(directCondition.data.payoutDenominator, 1n);
+  assert.deepEqual(directCondition.data.payoutNumerators, directPayouts);
+
+  const stagedQuestionId = new Uint8Array(32).fill(29);
+  const stagedConditionId = deriveConditionId(payer.address, stagedQuestionId, 256);
+  const [stagedConditionAddress] = await getConditionAddress(stagedConditionId);
+  const [payoutReportAddress] = await getPayoutReportAddress(stagedConditionId);
+  await sendInstruction(
+    payer,
+    getPrepareConditionInstruction({
+      payer,
+      condition: stagedConditionAddress,
+      conditionId: stagedConditionId,
+      resolver: payer.address,
+      questionId: stagedQuestionId,
+      outcomeCount: 256,
+    }),
+    v0Only,
+  );
+  const stagedPayouts = Array<bigint>(256).fill(0n);
+  stagedPayouts[255] = 7n;
+  const stagedPlan = planPayoutReport(stagedPayouts, v0Only);
+  assert.equal(stagedPlan.kind, "staged");
+  if (stagedPlan.kind !== "staged") throw new Error("expected a staged payout report");
+
+  await sendInstruction(
+    payer,
+    getInitializePayoutReportInstruction({
+      payer,
+      resolver: payer,
+      condition: stagedConditionAddress,
+      payoutReport: payoutReportAddress,
+    }),
+    v0Only,
+  );
+  for (const chunk of stagedPlan.chunks) {
+    await sendInstruction(
+      payer,
+      getAppendPayoutReportInstruction({
+        resolver: payer,
+        condition: stagedConditionAddress,
+        payoutReport: payoutReportAddress,
+        payoutNumerators: [...chunk],
+      }),
+      v0Only,
+    );
+  }
+  const pendingReport = await fetchPayoutReport(rpc, payoutReportAddress);
+  assert.equal(pendingReport.data.payoutNumerators.length, 256);
+  assert.equal(pendingReport.data.payoutDenominator, 7n);
+  await sendInstruction(
+    payer,
+    getFinalizePayoutReportInstruction({
+      resolver: payer,
+      condition: stagedConditionAddress,
+      payoutReport: payoutReportAddress,
+      rentRefund: payer.address,
+    }),
+    v0Only,
+  );
+
+  const stagedCondition = await fetchCondition(rpc, stagedConditionAddress);
+  assert.equal(stagedCondition.data.status, 1);
+  assert.equal(stagedCondition.data.payoutDenominator, 7n);
+  assert.deepEqual(stagedCondition.data.payoutNumerators, stagedPayouts);
+  assert.equal((await fetchMaybePayoutReport(rpc, payoutReportAddress)).exists, false);
 });
