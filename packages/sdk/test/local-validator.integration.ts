@@ -21,11 +21,13 @@ import {
   type Instruction,
 } from "@solana/kit";
 import {
+  fetchMint,
   fetchToken,
   findAssociatedTokenPda,
   getCreateAssociatedTokenInstruction,
   getCreateMintInstructionPlan,
   getMintToInstruction,
+  getTransferCheckedInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 
@@ -44,6 +46,8 @@ import {
   fetchVerifiedCondition,
   fetchVerifiedPosition,
   fetchVerifiedPositionBalance,
+  fetchVerifiedWrapper,
+  fetchVerifiedWrapperByMint,
   getAppendPayoutReportInstruction,
   getBatchTransferNativePositionsInstruction,
   getBatchTransferSetupInstructions,
@@ -53,6 +57,7 @@ import {
   getConditionAddress,
   getFinalizePayoutReportInstruction,
   getInitializePositionBalanceInstruction,
+  getInitializeCanonicalWrapperInstruction,
   getMergeRootCollateralInstruction,
   getMergeNativePositionsInstruction,
   getInitializePayoutReportInstruction,
@@ -64,15 +69,20 @@ import {
   getRedeemNativePositionInstruction,
   getRedeemRootCollateralInstruction,
   getRootCollateralSetupInstructions,
+  getCreateWrapperTokenAccountInstruction,
   getReportPayoutsInstruction,
   getVaultAuthorityAddress,
   getSplitRootCollateralInstruction,
   getSplitNativePositionInstruction,
   getNativePositionSetupInstructions,
   getTransferNativePositionInstruction,
+  getUnwrapWrappedPositionInstruction,
+  getWrapNativePositionInstruction,
+  getWrapperMintAddress,
   planPayoutReport,
   ROOT_COLLECTION_ID,
   selectTransactionVersion,
+  TOKEN_2022_PROGRAM_ADDRESS,
   type CcTokenTransactionVersion,
 } from "../src/index.ts";
 
@@ -462,6 +472,126 @@ test("generated client submits the native lifecycle through v0 and v1", async ()
     assert.equal(payerBalance.exists && payerBalance.account.data.amount, 300n);
     assert.equal(recipientBalance.exists && recipientBalance.account.data.amount, 0n);
   }
+
+  await sendInstruction(
+    payer,
+    await getInitializeCanonicalWrapperInstruction({
+      payer,
+      collateralMint: mint.address,
+      positionId: rootPositionIds[0]!,
+    }),
+    v0Only,
+  );
+  const [wrapperMint] = await getWrapperMintAddress(rootPositionIds[0]!);
+  const [otherWrapperMint] = await getWrapperMintAddress(rootPositionIds[1]!);
+  assert.notEqual(wrapperMint, otherWrapperMint);
+  await sendInstruction(
+    payer,
+    await getInitializeCanonicalWrapperInstruction({
+      payer,
+      collateralMint: mint.address,
+      positionId: rootPositionIds[1]!,
+    }),
+    v0Only,
+  );
+  const verifiedWrapper = await fetchVerifiedWrapper(rpc, rootPositionIds[0]!);
+  assert.equal(verifiedWrapper.mint.address, wrapperMint);
+  assert.deepEqual(verifiedWrapper.config.data.positionId, rootPositionIds[0]!);
+  assert.equal(
+    (await fetchVerifiedWrapperByMint(rpc, wrapperMint)).position.address,
+    verifiedWrapper.position.address,
+  );
+
+  await sendInstructions(
+    payer,
+    [
+      await getCreateWrapperTokenAccountInstruction({
+        payer,
+        owner: payer.address,
+        positionId: rootPositionIds[0]!,
+      }),
+      await getCreateWrapperTokenAccountInstruction({
+        payer,
+        owner: transferRecipient.address,
+        positionId: rootPositionIds[0]!,
+      }),
+    ],
+    v0Only,
+  );
+  const [payerWrapperAccount] = await findAssociatedTokenPda({
+    owner: payer.address,
+    tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    mint: wrapperMint,
+  });
+  const [recipientWrapperAccount] = await findAssociatedTokenPda({
+    owner: transferRecipient.address,
+    tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    mint: wrapperMint,
+  });
+  await sendInstruction(
+    payer,
+    await getWrapNativePositionInstruction({
+      owner: payer,
+      positionId: rootPositionIds[0]!,
+      amount: 60n,
+    }),
+    v0Only,
+  );
+  assert.equal((await fetchToken(rpc, payerWrapperAccount)).data.amount, 60n);
+  assert.equal((await fetchMint(rpc, wrapperMint)).data.supply, 60n);
+  const wrappedPayerBalance = await fetchVerifiedPositionBalance(
+    rpc,
+    payer.address,
+    rootPositionIds[0]!,
+  );
+  assert.equal(wrappedPayerBalance.exists && wrappedPayerBalance.account.data.amount, 240n);
+
+  await sendInstruction(
+    payer,
+    getTransferCheckedInstruction(
+      {
+        source: payerWrapperAccount,
+        mint: wrapperMint,
+        destination: recipientWrapperAccount,
+        authority: payer,
+        amount: 60n,
+        decimals: 6,
+      },
+      { programAddress: TOKEN_2022_PROGRAM_ADDRESS },
+    ),
+    v0Only,
+  );
+  await fund(transferRecipient.address);
+  await sendInstruction(
+    payer,
+    await getUnwrapWrappedPositionInstruction({
+      owner: transferRecipient,
+      positionId: rootPositionIds[0]!,
+      amount: 60n,
+    }),
+    v0Only,
+  );
+  assert.equal((await fetchToken(rpc, recipientWrapperAccount)).data.amount, 0n);
+  assert.equal((await fetchMint(rpc, wrapperMint)).data.supply, 0n);
+  const unwrappedRecipientBalance = await fetchVerifiedPositionBalance(
+    rpc,
+    transferRecipient.address,
+    rootPositionIds[0]!,
+  );
+  assert.equal(
+    unwrappedRecipientBalance.exists && unwrappedRecipientBalance.account.data.amount,
+    60n,
+  );
+  await sendInstruction(
+    payer,
+    await getTransferNativePositionInstruction({
+      owner: transferRecipient,
+      recipient: payer.address,
+      positionId: rootPositionIds[0]!,
+      amount: 60n,
+    }),
+    v0Only,
+  );
 
   const redemptionQuestionId = new Uint8Array(32).fill(18);
   const redemptionConditionId = deriveConditionId(payer.address, redemptionQuestionId, 2);

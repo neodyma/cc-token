@@ -30,10 +30,13 @@ Measurements use the SBPF v3 program built with Solana 4.3.0 and executed by Lit
 | Redeem to an existing residual balance    |        58,266 |
 | Redeem a root position to collateral      |        42,301 |
 | Redeem a maximum-width payout             |        46,221 |
+| Initialize a canonical wrapper            |        25,325 |
+| Wrap a native position                    |        26,557 |
+| Unwrap into a new native balance          |        27,620 |
 
 The recorded atomic and nested fixtures each found a valid BN254 x-coordinate after one hash-to-curve attempt. The tests print current compute use and retry counts so changes remain visible.
 
-The local-validator suite executes condition preparation, BN254 collection registration, root collateral split/merge, grouped native refinement, single and batch transfer, residual redemption and collateral redemption through version 0, then another collection registration through version 1. It also submits all 256 payout numerators atomically through version 1 and submits the same arity through version 0 using three append transactions before atomic finalization.
+The local-validator suite executes condition preparation, BN254 collection registration, root collateral split/merge, grouped native refinement, single and batch transfer, wrapper initialization, wrapping, ordinary Token-2022 transfer, unwrapping, residual redemption and collateral redemption through version 0, then another collection registration through version 1. It verifies wrapper reverse discovery from both the position and mint. It also submits all 256 payout numerators atomically through version 1 and submits the same arity through version 0 using three append transactions before atomic finalization.
 
 Root collateral split capacity was measured with every outcome represented by one position:
 
@@ -66,3 +69,5 @@ Native batch transfer was measured after recipient balances were initialized:
 Two and eight positions fit a static version-0 transaction. Sixteen positions fit version 0 with an address lookup table. Batch transfer is capped at sixteen positions; clients can submit additional complete batches. A single transfer can initialize its recipient balance atomically, including when that PDA was pre-funded with lamports. Batch callers initialize missing recipient balances with ordinary setup instructions before the value-moving transaction.
 
 One-factor residual redemption uses eight accounts and produced a 483-byte static version-0 transaction. Root redemption uses ten accounts and also fits version 0 without a lookup table. The runtime suite removes either factor from the same two-condition position, redeems repeated factors one at a time, exercises zero-paying claims, and checks SPL Token and Token-2022 collateral payouts. The maximum-width case computes the 136-bit product on-chain and returns `u64::MAX - 1`, leaving one registered collateral unit in the vault.
+
+Wrapper configuration and Token-2022 mint addresses are derived only from the 32-byte position ID. Runtime tests reuse the same wrapper without changing its mint or supply and derive distinct mints when the outcome subset, collateral mint or factor multiplicity changes. Wrapping debits the native balance by the exact minted amount. After an ordinary Token-2022 transfer, the new holder can burn the wrapper and receive the same raw amount in a native balance. Wrong wrapper/position pairs, insufficient native balance and insufficient wrapper balance leave native balances, token accounts and mint supply unchanged.

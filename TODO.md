@@ -77,14 +77,14 @@
 
 ## 6. Canonical Token-2022 wrappers
 
-- [ ] Deterministic wrapper configuration
-- [ ] Canonical wrapper mint per position
-- [ ] Exact native-to-token wrapping
-- [ ] Exact token-to-native unwrapping
-- [ ] Wrapper transfers through ordinary Token-2022 accounts
-- [ ] Mint authority and supply invariants
-- [ ] Reverse discovery from wrapper mint to position definition
-- [ ] Failure and rollback tests
+- [x] Deterministic wrapper configuration
+- [x] Canonical wrapper mint per position
+- [x] Exact native-to-token wrapping
+- [x] Exact token-to-native unwrapping
+- [x] Wrapper transfers through ordinary Token-2022 accounts
+- [x] Mint authority and supply invariants
+- [x] Reverse discovery from wrapper mint to position definition
+- [x] Failure and rollback tests
 
 ## 7. Compression compatibility and compressed balances (deferred)
 
@@ -117,7 +117,7 @@
 - [ ] Balance discovery across representations
 - [x] Logical subset normalization
 - [x] Explicit repeated-factor construction
-- [ ] Split, merge, transfer, resolution, redemption and wrapper builders
+- [x] Split, merge, transfer, resolution, redemption and wrapper builders
 - [ ] Transaction capacity estimation
 - [ ] Large-operation planning into complete resumable steps
 - [ ] Simulation, submission, confirmation and refetch behavior

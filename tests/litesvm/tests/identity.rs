@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anchor_lang::{
     prelude::{AccountDeserialize, AccountSerialize, Pubkey, System},
+    solana_program::program_pack::Pack,
     Id, InstructionData, ToAccountMetas,
 };
 use anchor_spl::{
@@ -13,6 +14,7 @@ use cc_token::{
     constants::{
         BALANCE_SEED, COLLATERAL_POLICY_VERSION, COLLATERAL_SEED, COLLECTION_SEED,
         CONDITION_SEED, POSITION_SEED, ROOT_COLLECTION_ID, STATE_VERSION, VAULT_SEED,
+        WRAPPER_MINT_SEED, WRAPPER_SEED,
     },
     identity::{derive_collection_id, derive_position_id},
     instruction,
@@ -24,10 +26,12 @@ use cc_token::{
         },
         settlement::{RedeemPositionArgs, ReportPayoutsArgs},
         setup::PrepareConditionArgs,
+        wrapping::{UnwrapPositionArgs, WrapPositionArgs},
     },
     math::IndexSet,
     state::{
         CollateralConfig, CollectionDefinition, Condition, PositionBalance, PositionDefinition,
+        WrapperConfig,
     },
     ID,
 };
@@ -38,7 +42,7 @@ use litesvm_token::{
         instruction::initialize_mint2,
         state::Mint,
     },
-    CreateAssociatedTokenAccount, CreateMint, FreezeAccount, MintTo,
+    CreateAssociatedTokenAccount, CreateMint, FreezeAccount, MintTo, TransferChecked,
 };
 use solana_account::Account;
 use solana_address::Address;
@@ -278,6 +282,21 @@ impl TestContext {
             .amount
     }
 
+    fn wrapper(&self, position_id: [u8; 32]) -> WrapperConfig {
+        deserialize_account(
+            &self
+                .svm
+                .get_account(&wrapper_address(position_id))
+                .unwrap()
+                .data,
+        )
+    }
+
+    fn mint_supply(&self, mint: Address) -> u64 {
+        let account = self.svm.get_account(&mint).unwrap();
+        Mint::unpack(&account.data[..Mint::LEN]).unwrap().supply
+    }
+
     fn send_with_owner(
         &mut self,
         instruction: Instruction,
@@ -330,6 +349,14 @@ fn position_address(position_id: [u8; 32]) -> Address {
 
 fn balance_address(owner: Address, position_id: [u8; 32]) -> Address {
     Address::find_program_address(&[BALANCE_SEED, owner.as_ref(), &position_id], &ID).0
+}
+
+fn wrapper_address(position_id: [u8; 32]) -> Address {
+    Address::find_program_address(&[WRAPPER_SEED, &position_id], &ID).0
+}
+
+fn wrapper_mint_address(position_id: [u8; 32]) -> Address {
+    Address::find_program_address(&[WRAPPER_MINT_SEED, &position_id], &ID).0
 }
 
 fn prepare_condition_instruction(payer: Address, args: PrepareConditionArgs) -> Instruction {
@@ -412,6 +439,79 @@ fn close_balance_instruction(
         }
         .to_account_metas(None),
         data: instruction::CloseBalance {}.data(),
+    }
+}
+
+fn initialize_wrapper_instruction(
+    payer: Address,
+    collateral_mint: Address,
+    position_id: [u8; 32],
+) -> Instruction {
+    Instruction {
+        program_id: ID,
+        accounts: accounts::InitializeWrapper {
+            payer,
+            position: position_address(position_id),
+            collateral_config: collateral_config_address(collateral_mint),
+            wrapper: wrapper_address(position_id),
+            mint: wrapper_mint_address(position_id),
+            token_program: anchor_spl::token_2022::ID,
+            system_program: System::id(),
+        }
+        .to_account_metas(None),
+        data: instruction::InitializeWrapper {}.data(),
+    }
+}
+
+fn wrap_position_instruction(
+    owner: Address,
+    position_id: [u8; 32],
+    wrapper_position_id: [u8; 32],
+    destination: Address,
+    amount: u64,
+) -> Instruction {
+    Instruction {
+        program_id: ID,
+        accounts: accounts::WrapPosition {
+            owner,
+            position: position_address(position_id),
+            balance: balance_address(owner, position_id),
+            wrapper: wrapper_address(wrapper_position_id),
+            mint: wrapper_mint_address(wrapper_position_id),
+            destination,
+            token_program: anchor_spl::token_2022::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::WrapPosition {
+            args: WrapPositionArgs { amount },
+        }
+        .data(),
+    }
+}
+
+fn unwrap_position_instruction(
+    owner: Address,
+    position_id: [u8; 32],
+    source: Address,
+    amount: u64,
+) -> Instruction {
+    Instruction {
+        program_id: ID,
+        accounts: accounts::UnwrapPosition {
+            owner,
+            position: position_address(position_id),
+            balance: balance_address(owner, position_id),
+            wrapper: wrapper_address(position_id),
+            mint: wrapper_mint_address(position_id),
+            source,
+            token_program: anchor_spl::token_2022::ID,
+            system_program: System::id(),
+        }
+        .to_account_metas(None),
+        data: instruction::UnwrapPosition {
+            args: UnwrapPositionArgs { amount },
+        }
+        .data(),
     }
 }
 
@@ -3577,5 +3677,338 @@ fn invalid_subsets_parents_and_points_leave_no_collection() {
     assert_eq!(
         context.collection(malformed_parent_id).collection_id,
         malformed_parent_id
+    );
+}
+
+#[test]
+fn wrapper_mints_are_canonical_for_semantically_distinct_positions() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let token_program = anchor_spl::token::ID;
+    let first_collateral = context.create_mint(token_program, None);
+    context
+        .send(
+            register_collateral_instruction(payer, first_collateral, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let (condition, partition, position_ids) =
+        prepare_root_positions(&mut context, first_collateral, 2, payer);
+
+    let first_position_id = position_ids[0];
+    let alternate_outcome_position_id = position_ids[1];
+    let first_wrapper_mint = wrapper_mint_address(first_position_id);
+    assert_eq!(first_wrapper_mint, wrapper_mint_address(first_position_id));
+    assert_ne!(
+        first_wrapper_mint,
+        wrapper_mint_address(alternate_outcome_position_id)
+    );
+
+    for position_id in [first_position_id, alternate_outcome_position_id] {
+        context
+            .send(
+                initialize_wrapper_instruction(payer, first_collateral, position_id),
+                TransactionVersion::V0,
+            )
+            .unwrap();
+    }
+
+    let first_wrapper_data = context
+        .svm
+        .get_account(&wrapper_address(first_position_id))
+        .unwrap()
+        .data;
+    context
+        .send(
+            initialize_wrapper_instruction(payer, first_collateral, first_position_id),
+            TransactionVersion::V1,
+        )
+        .unwrap();
+    assert_eq!(
+        context
+            .svm
+            .get_account(&wrapper_address(first_position_id))
+            .unwrap()
+            .data,
+        first_wrapper_data
+    );
+
+    let first_collection_id = derive_collection_id(
+        ROOT_COLLECTION_ID,
+        condition.condition_id,
+        partition[0],
+    )
+    .unwrap()
+    .collection_id;
+    let second_collateral = context.create_mint(token_program, None);
+    context
+        .send(
+            register_collateral_instruction(payer, second_collateral, token_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let alternate_collateral_position_id =
+        derive_position_id(&second_collateral, first_collection_id).unwrap();
+    context
+        .send(
+            register_position_instruction(
+                payer,
+                RegisterPositionArgs {
+                    position_id: alternate_collateral_position_id,
+                    collateral_mint: second_collateral,
+                    collection_id: first_collection_id,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    context
+        .send(
+            initialize_wrapper_instruction(
+                payer,
+                second_collateral,
+                alternate_collateral_position_id,
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let repeated_collection = register_args(
+        first_collection_id,
+        condition.condition_id,
+        partition[0],
+    );
+    context
+        .send(
+            register_collection_instruction(
+                payer,
+                repeated_collection.clone(),
+                Some(collection_address(first_collection_id)),
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let repeated_factor_position_id =
+        derive_position_id(&first_collateral, repeated_collection.collection_id).unwrap();
+    context
+        .send(
+            register_position_instruction(
+                payer,
+                RegisterPositionArgs {
+                    position_id: repeated_factor_position_id,
+                    collateral_mint: first_collateral,
+                    collection_id: repeated_collection.collection_id,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    context
+        .send(
+            initialize_wrapper_instruction(payer, first_collateral, repeated_factor_position_id),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let alternate_collateral_mint = wrapper_mint_address(alternate_collateral_position_id);
+    let repeated_factor_mint = wrapper_mint_address(repeated_factor_position_id);
+    assert_ne!(first_wrapper_mint, alternate_collateral_mint);
+    assert_ne!(first_wrapper_mint, repeated_factor_mint);
+    assert_ne!(alternate_collateral_mint, repeated_factor_mint);
+    for position_id in [
+        first_position_id,
+        alternate_outcome_position_id,
+        alternate_collateral_position_id,
+        repeated_factor_position_id,
+    ] {
+        let wrapper = context.wrapper(position_id);
+        assert_eq!(wrapper.position_id, position_id);
+        assert_eq!(wrapper.mint, wrapper_mint_address(position_id));
+        assert_eq!(wrapper.decimals, COLLATERAL_DECIMALS);
+    }
+}
+
+#[test]
+fn wrappers_preserve_native_supply_through_token_transfers_and_failures() {
+    let mut context = TestContext::new();
+    let payer = context.payer.pubkey();
+    let collateral_program = anchor_spl::token::ID;
+    let wrapper_program = anchor_spl::token_2022::ID;
+    let (collateral_mint, owner_collateral) =
+        context.create_funded_collateral(collateral_program, 100);
+    context
+        .send(
+            register_collateral_instruction(payer, collateral_mint, collateral_program),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let (condition, partition, position_ids) =
+        prepare_root_positions(&mut context, collateral_mint, 2, payer);
+    context
+        .send(
+            split_from_collateral_instruction(
+                payer,
+                owner_collateral,
+                collateral_mint,
+                collateral_program,
+                RootCollateralArgs {
+                    condition_id: condition.condition_id,
+                    partition,
+                    amount: 100,
+                },
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+
+    let wrapped_position_id = position_ids[0];
+    let other_position_id = position_ids[1];
+    let wrapper_mint = wrapper_mint_address(wrapped_position_id);
+    let initialize_metadata = context
+        .send(
+            initialize_wrapper_instruction(payer, collateral_mint, wrapped_position_id),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    context
+        .send(
+            initialize_wrapper_instruction(payer, collateral_mint, other_position_id),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    let owner_wrapper = CreateAssociatedTokenAccount::new(
+        &mut context.svm,
+        &context.payer,
+        &wrapper_mint,
+    )
+    .token_program_id(&wrapper_program)
+    .send()
+    .unwrap();
+
+    let wrap_metadata = context
+        .send(
+            wrap_position_instruction(
+                payer,
+                wrapped_position_id,
+                wrapped_position_id,
+                owner_wrapper,
+                40,
+            ),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.balance(payer, wrapped_position_id).amount, 60);
+    assert_eq!(context.token_amount(owner_wrapper), 40);
+    assert_eq!(context.mint_supply(wrapper_mint), 40);
+
+    context
+        .send(
+            initialize_wrapper_instruction(payer, collateral_mint, wrapped_position_id),
+            TransactionVersion::V0,
+        )
+        .unwrap();
+    assert_eq!(context.mint_supply(wrapper_mint), 40);
+
+    let wrong_wrapper_mint = wrapper_mint_address(other_position_id);
+    let wrong_destination = CreateAssociatedTokenAccount::new(
+        &mut context.svm,
+        &context.payer,
+        &wrong_wrapper_mint,
+    )
+    .token_program_id(&wrapper_program)
+    .send()
+    .unwrap();
+    assert!(context
+        .send(
+            wrap_position_instruction(
+                payer,
+                wrapped_position_id,
+                other_position_id,
+                wrong_destination,
+                1,
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert_eq!(context.balance(payer, wrapped_position_id).amount, 60);
+    assert_eq!(context.token_amount(wrong_destination), 0);
+    assert_eq!(context.mint_supply(wrong_wrapper_mint), 0);
+
+    assert!(context
+        .send(
+            wrap_position_instruction(
+                payer,
+                wrapped_position_id,
+                wrapped_position_id,
+                owner_wrapper,
+                61,
+            ),
+            TransactionVersion::V0,
+        )
+        .is_err());
+    assert_eq!(context.balance(payer, wrapped_position_id).amount, 60);
+    assert_eq!(context.token_amount(owner_wrapper), 40);
+    assert_eq!(context.mint_supply(wrapper_mint), 40);
+
+    let recipient = Keypair::new();
+    context
+        .svm
+        .airdrop(&recipient.pubkey(), 1_000_000_000)
+        .unwrap();
+    let recipient_wrapper = CreateAssociatedTokenAccount::new(
+        &mut context.svm,
+        &context.payer,
+        &wrapper_mint,
+    )
+    .owner(&recipient.pubkey())
+    .token_program_id(&wrapper_program)
+    .send()
+    .unwrap();
+    TransferChecked::new(
+        &mut context.svm,
+        &context.payer,
+        &wrapper_mint,
+        &recipient_wrapper,
+        40,
+    )
+    .source(&owner_wrapper)
+    .token_program_id(&wrapper_program)
+    .send()
+    .unwrap();
+    assert_eq!(context.token_amount(owner_wrapper), 0);
+    assert_eq!(context.token_amount(recipient_wrapper), 40);
+
+    let unwrap_metadata = context
+        .send_with_owner(
+            unwrap_position_instruction(recipient.pubkey(), wrapped_position_id, recipient_wrapper, 40),
+            &recipient,
+        )
+        .unwrap();
+    assert_eq!(context.token_amount(recipient_wrapper), 0);
+    assert_eq!(context.mint_supply(wrapper_mint), 0);
+    assert_eq!(context.balance(recipient.pubkey(), wrapped_position_id).amount, 40);
+    assert_eq!(
+        context.balance(payer, wrapped_position_id).amount
+            + context.balance(recipient.pubkey(), wrapped_position_id).amount,
+        100
+    );
+
+    assert!(context
+        .send_with_owner(
+            unwrap_position_instruction(recipient.pubkey(), wrapped_position_id, recipient_wrapper, 1),
+            &recipient,
+        )
+        .is_err());
+    assert_eq!(context.balance(recipient.pubkey(), wrapped_position_id).amount, 40);
+    assert_eq!(context.token_amount(recipient_wrapper), 0);
+    assert_eq!(context.mint_supply(wrapper_mint), 0);
+
+    assert_within_transaction_limit(&wrap_metadata);
+    assert_within_transaction_limit(&unwrap_metadata);
+    println!(
+        "wrapper initialize_cu={} wrap_cu={} unwrap_cu={}",
+        initialize_metadata.compute_units_consumed,
+        wrap_metadata.compute_units_consumed,
+        unwrap_metadata.compute_units_consumed,
     );
 }
