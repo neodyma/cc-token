@@ -112,8 +112,11 @@ pub mod cc_token {
         settlement::cancel_payout_report(ctx)
     }
 
-    pub fn redeem_position(ctx: Context<RedeemPosition>) -> CcTokenResult {
-        settlement::redeem_position(ctx)
+    pub fn redeem_position(
+        ctx: Context<RedeemPosition>,
+        args: RedeemPositionArgs,
+    ) -> CcTokenResult {
+        settlement::redeem_position(ctx, args)
     }
 
     pub fn initialize_wrapper(ctx: Context<InitializeWrapper>) -> CcTokenResult {

@@ -3,6 +3,7 @@ mod cancel_payout_report;
 mod finalize_payout_report;
 mod initialize_payout_report;
 mod redeem_position;
+mod redemption;
 mod report_payouts;
 
 pub use append_payout_report::*;
@@ -10,6 +11,7 @@ pub use cancel_payout_report::*;
 pub use finalize_payout_report::*;
 pub use initialize_payout_report::*;
 pub use redeem_position::*;
+pub use redemption::RedeemPositionArgs;
 pub use report_payouts::*;
 
 use anchor_lang::prelude::*;

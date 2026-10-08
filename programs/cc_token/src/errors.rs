@@ -88,6 +88,8 @@ pub enum CcTokenError {
     UnauthorizedResolver,
     #[msg("Condition payouts have already been reported")]
     ConditionAlreadyResolved,
+    #[msg("Condition payouts have not been reported")]
+    ConditionNotResolved,
     #[msg("Payout numerator count must equal the condition outcome count")]
     PayoutNumeratorCountMismatch,
     #[msg("A payout report chunk must contain at least one numerator")]

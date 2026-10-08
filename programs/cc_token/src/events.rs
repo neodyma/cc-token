@@ -100,6 +100,17 @@ pub struct PositionsBatchTransferred {
 }
 
 #[event]
+pub struct PositionRedeemed {
+    pub owner: Pubkey,
+    pub collateral_mint: Pubkey,
+    pub source_position_id: [u8; 32],
+    pub destination_position_id: [u8; 32],
+    pub condition_id: [u8; 32],
+    pub amount: u64,
+    pub payout: u64,
+}
+
+#[event]
 pub struct PayoutsReported {
     pub condition_id: [u8; 32],
     pub resolver: Pubkey,
