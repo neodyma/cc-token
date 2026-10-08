@@ -12,3 +12,4 @@ pub const VAULT_SEED: &[u8] = b"vault";
 pub const BALANCE_SEED: &[u8] = b"balance";
 pub const WRAPPER_SEED: &[u8] = b"wrapper";
 pub const WRAPPER_MINT_SEED: &[u8] = b"wrapper_mint";
+pub const MAX_BATCH_TRANSFERS: usize = 16;

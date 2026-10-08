@@ -17,6 +17,15 @@ pub struct BalanceUpdate<'info> {
     balance: PositionBalance,
 }
 
+impl<'info> BalanceUpdate<'info> {
+    pub fn new(account: &AccountInfo<'info>, balance: PositionBalance) -> Self {
+        Self {
+            account: account.clone(),
+            balance,
+        }
+    }
+}
+
 pub fn validate_balance_update<'info>(
     position_account: &AccountInfo<'info>,
     balance_account: &AccountInfo<'info>,
@@ -151,10 +160,10 @@ fn validate_unique_account(
     Ok(())
 }
 
-fn deserialize_position(account: &AccountInfo) -> CcTokenResult<PositionDefinition> {
+pub fn deserialize_position(account: &AccountInfo) -> CcTokenResult<PositionDefinition> {
     PositionDefinition::try_deserialize(&mut account.try_borrow_data()?.as_ref())
 }
 
-fn deserialize_balance(account: &AccountInfo) -> CcTokenResult<PositionBalance> {
+pub fn deserialize_balance(account: &AccountInfo) -> CcTokenResult<PositionBalance> {
     PositionBalance::try_deserialize(&mut account.try_borrow_data()?.as_ref())
 }

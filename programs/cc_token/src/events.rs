@@ -93,6 +93,13 @@ pub struct PositionTransferred {
 }
 
 #[event]
+pub struct PositionsBatchTransferred {
+    pub source_owner: Pubkey,
+    pub destination_owner: Pubkey,
+    pub position_count: u16,
+}
+
+#[event]
 pub struct PayoutsReported {
     pub condition_id: [u8; 32],
     pub resolver: Pubkey,

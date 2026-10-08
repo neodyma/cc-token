@@ -82,8 +82,11 @@ pub mod cc_token {
         positions::transfer_position(ctx, args)
     }
 
-    pub fn batch_transfer_positions(ctx: Context<BatchTransferPositions>) -> CcTokenResult {
-        positions::batch_transfer_positions(ctx)
+    pub fn batch_transfer_positions(
+        ctx: Context<BatchTransferPositions>,
+        args: BatchTransferPositionsArgs,
+    ) -> CcTokenResult {
+        positions::batch_transfer_positions(ctx, args)
     }
 
     pub fn report_payouts(ctx: Context<ReportPayouts>, args: ReportPayoutsArgs) -> CcTokenResult {

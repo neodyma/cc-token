@@ -74,6 +74,14 @@ pub enum CcTokenError {
     InvalidTransferDestination,
     #[msg("Source and destination owners must differ")]
     SelfTransfer,
+    #[msg("A transfer batch must contain at least one position")]
+    EmptyTransferBatch,
+    #[msg("A transfer batch contains too many positions")]
+    TransferBatchTooLarge,
+    #[msg("Transfer accounts must contain one position, source and destination per amount")]
+    InvalidTransferAccounts,
+    #[msg("A transfer batch must not contain the same position more than once")]
+    DuplicateTransferEntry,
     #[msg("Collateral token balance is insufficient")]
     InsufficientCollateral,
     #[msg("Only the condition resolver may report payouts")]
