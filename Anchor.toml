@@ -12,6 +12,9 @@ skip-lint = false
 [programs.localnet]
 cc_token = "JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW"
 
+[programs.devnet]
+cc_token = "JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW"
+
 [provider]
 cluster = "localnet"
 wallet = ".local/wallet.json"

@@ -18,7 +18,7 @@ coverage/
 *.tsbuildinfo
 /packages/*/src/generated/
 
-# Local wallets, credentials, and private working documents
+# Local wallets and credentials
 .local/
 .env
 .env.*
@@ -30,7 +30,6 @@ wallet.json
 wallets/
 *.pem
 *.key
-/cc-token-local/
 
 # Logs / editor state
 *.log
