@@ -103,6 +103,20 @@ pub fn validate_position(
     Ok(())
 }
 
+pub fn validate_position_identity(
+    address: &Pubkey,
+    position: &PositionDefinition,
+) -> CcTokenResult {
+    let position_id = derive_position_id(&position.collateral_mint, position.collection_id)?;
+    validate_position(
+        address,
+        position,
+        position.collateral_mint,
+        position.collection_id,
+        position_id,
+    )
+}
+
 pub fn validate_balance(
     address: &Pubkey,
     balance: &PositionBalance,

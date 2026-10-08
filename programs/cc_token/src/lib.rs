@@ -75,8 +75,11 @@ pub mod cc_token {
         positions::merge_positions(ctx, args)
     }
 
-    pub fn transfer_position(ctx: Context<TransferPosition>) -> CcTokenResult {
-        positions::transfer_position(ctx)
+    pub fn transfer_position<'info>(
+        ctx: Context<'info, TransferPosition<'info>>,
+        args: TransferPositionArgs,
+    ) -> CcTokenResult {
+        positions::transfer_position(ctx, args)
     }
 
     pub fn batch_transfer_positions(ctx: Context<BatchTransferPositions>) -> CcTokenResult {

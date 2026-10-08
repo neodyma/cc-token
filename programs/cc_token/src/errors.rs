@@ -70,6 +70,10 @@ pub enum CcTokenError {
     DuplicateAccount,
     #[msg("Position balance is insufficient")]
     InsufficientPositionBalance,
+    #[msg("A single transfer requires exactly one destination balance account")]
+    InvalidTransferDestination,
+    #[msg("Source and destination owners must differ")]
+    SelfTransfer,
     #[msg("Collateral token balance is insufficient")]
     InsufficientCollateral,
     #[msg("Only the condition resolver may report payouts")]

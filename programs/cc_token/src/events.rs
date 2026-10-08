@@ -85,6 +85,14 @@ pub struct PositionsMerged {
 }
 
 #[event]
+pub struct PositionTransferred {
+    pub source_owner: Pubkey,
+    pub destination_owner: Pubkey,
+    pub position_id: [u8; 32],
+    pub amount: u64,
+}
+
+#[event]
 pub struct PayoutsReported {
     pub condition_id: [u8; 32],
     pub resolver: Pubkey,
