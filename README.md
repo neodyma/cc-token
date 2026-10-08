@@ -33,3 +33,17 @@ pnpm check
 pnpm test
 pnpm format:check
 ```
+
+## Web demo
+
+`apps/web/` is the Scenario Composer, a browser demo that derives claim identifiers, holdings and payouts with the SDK. It sends no transactions.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm dev:web
+```
+
+Then open <http://localhost:5173>. `pnpm build` is needed once so the program IDL exists; `pnpm dev:web` regenerates the SDK client from it and starts the Vite dev server.
+
+The wallet button targets Solana devnet. Set `VITE_SOLANA_RPC_URL` to use a different RPC endpoint.

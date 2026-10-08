@@ -128,7 +128,7 @@
 
 ## 9. Scenario Composer
 
-- [ ] Vite/React application
+- [x] Vite/React application
 - [ ] Condition and position inspection
 - [ ] Grouped partition construction
 - [ ] Split, merge, transfer, resolve, redeem, wrap and unwrap flows
