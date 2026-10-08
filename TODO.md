@@ -129,6 +129,7 @@
 ## 9. Scenario Composer
 
 - [x] Vite/React application
+- [x] Browser simulator: position graph, split, merge, simulated market and redemption
 - [ ] Condition and position inspection
 - [ ] Grouped partition construction
 - [ ] Split, merge, transfer, resolve, redeem, wrap and unwrap flows

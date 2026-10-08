@@ -36,7 +36,11 @@ pnpm format:check
 
 ## Web demo
 
-`apps/web/` is the Scenario Composer, a browser demo that derives claim identifiers, holdings and payouts with the SDK. It sends no transactions.
+`apps/web/` is a browser demo with three pages:
+
+- **How it works** explains the protocol in plain terms.
+- **Simulator** is one interactive graph of positions: prepare questions, deposit, split, merge, trade against a simulated market maker, report results and redeem. It uses the SDK for identifiers and payouts and sends no transactions.
+- **Live** reports whether the program is deployed on devnet and whether a wallet is connected. It does not send transactions yet.
 
 ```sh
 pnpm install --frozen-lockfile
