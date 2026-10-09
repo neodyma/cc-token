@@ -31,11 +31,11 @@ import { PositionGraph, type GraphNode } from "./PositionGraph.tsx";
 import { ROUTES } from "./routes.ts";
 import {
   attempt,
+  boxLabel,
   claimStatement,
   compose,
   defineCondition,
   describeClaim,
-  describeSubset,
   findCondition,
   formatTokenAmount,
   holdingKey,
@@ -208,7 +208,7 @@ function Workspace(props: { scenario: Scenario; onSelectScenario: (key: string) 
         merge(ledger, option.parent, option.condition, option.partition, option.amount),
       );
       if (!done) return;
-      const pieces = `${amountOf(option.amount)} shares each of ${nameOf(option.left.factors)} and ${nameOf(option.right.factors)}`;
+      const pieces = `${amountOf(option.amount)} shares each of ${option.pieces.map((piece) => nameOf(piece.factors)).join(" and ")}`;
       log(
         option.result.length === 0
           ? `Merged ${pieces}. Together they covered every result, so ${tokens(option.amount)} was unlocked.`
@@ -297,10 +297,9 @@ function Workspace(props: { scenario: Scenario; onSelectScenario: (key: string) 
       title: `Free ${symbol}`,
       amount: formatTokenAmount(portfolio.collateral, decimals),
       empty: portfolio.collateral === 0n,
+      wallet: true,
     },
     ...ledger.nodes.map((node) => {
-      const narrowed = node.factors[node.factors.length - 1]!;
-      const given = node.factors.slice(0, -1);
       const held = balanceOf(ledger, node.key);
       const settled = settledValue(node.factors);
       const redeemable = held > 0n && node.factors.some(resolved);
@@ -317,11 +316,7 @@ function Workspace(props: { scenario: Scenario; onSelectScenario: (key: string) 
               : null;
       return {
         key: node.key,
-        context:
-          given.length > 0
-            ? `given ${describeClaim(conditions, given)}`
-            : findCondition(conditions, narrowed.conditionId).title,
-        title: describeSubset(findCondition(conditions, narrowed.conditionId), narrowed.indexSet),
+        ...boxLabel(conditions, node.factors),
         amount: `${formatTokenAmount(held, decimals)} sh`,
         detail: marketOpen
           ? `${Math.round(priceOf(node.factors) * 100)}¢`
@@ -515,7 +510,6 @@ function Workspace(props: { scenario: Scenario; onSelectScenario: (key: string) 
                 key={`${selectedNode?.key ?? COLLATERAL_KEY}:${selectedNode ? balanceOf(ledger, selectedNode.key) : portfolio.collateral}`}
                 {...workspace}
                 node={selectedNode}
-                suggested={start.deposit}
               />
             )
           }
@@ -625,12 +619,17 @@ function Verdict(props: { label: string; change: bigint; format: (amount: bigint
   );
 }
 
-function Questions(props: {
+export function Questions(props: {
   conditions: readonly DemoCondition[];
   resolutions: Resolutions;
   selectedKey: string | null;
   onSelect: (key: string) => void;
   onAdd: (title: string, outcomes: readonly string[]) => string | null;
+  // Ready-made questions offered in the form.
+  examples?: readonly Readonly<{ title: string; outcomes: readonly string[] }>[];
+  // Takes a question off the list, where that is possible.
+  removable?: (key: string) => boolean;
+  onRemove?: (key: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
@@ -661,24 +660,41 @@ function Questions(props: {
         {props.conditions.map((condition) => {
           const selected = condition.key === props.selectedKey;
           const done = props.resolutions[condition.key] !== undefined;
+          const removable =
+            props.onRemove !== undefined && (props.removable?.(condition.key) ?? true);
           return (
-            <button
+            <span
               key={condition.key}
-              type="button"
-              aria-pressed={selected}
-              title={condition.question}
-              onClick={() => props.onSelect(condition.key)}
-              className={`flex items-center gap-2 rounded-full border px-3 py-1 ${
+              className={`flex items-center rounded-full border ${
                 selected
                   ? "border-accent bg-accent-soft text-accent"
                   : "border-line hover:border-muted"
               }`}
             >
-              {condition.title}
-              <span className={`text-xs ${done ? "text-good" : "text-muted"}`}>
-                {done ? "resolved" : `${condition.outcomes.length} results`}
-              </span>
-            </button>
+              <button
+                type="button"
+                aria-pressed={selected}
+                title={condition.question}
+                onClick={() => props.onSelect(condition.key)}
+                className={`flex items-center gap-2 py-1 pl-3 ${removable ? "pr-1" : "pr-3"}`}
+              >
+                {condition.title}
+                <span className={`text-xs ${done ? "text-good" : "text-muted"}`}>
+                  {done ? "resolved" : `${condition.outcomes.length} results`}
+                </span>
+              </button>
+              {removable && (
+                <button
+                  type="button"
+                  onClick={() => props.onRemove?.(condition.key)}
+                  aria-label={`Hide ${condition.title}`}
+                  title="Hide from this list"
+                  className="py-1 pr-2.5 pl-1 leading-none text-muted hover:text-bad"
+                >
+                  ×
+                </button>
+              )}
+            </span>
           );
         })}
         {!adding && (
@@ -722,6 +738,27 @@ function Questions(props: {
             Cancel
           </button>
           {error && <p className="w-full text-bad">{error}</p>}
+          {props.examples && props.examples.length > 0 && (
+            <div className="flex w-full flex-wrap items-center gap-2">
+              <span className="text-muted">Examples</span>
+              {props.examples.map((example) => (
+                <button
+                  key={example.title + example.outcomes.join()}
+                  type="button"
+                  title={example.outcomes.join(", ")}
+                  onClick={() => {
+                    setTitle(example.title);
+                    setOutcomes(example.outcomes.join(", "));
+                    setError(null);
+                  }}
+                  className="rounded-full border border-line px-2.5 py-0.5 text-xs hover:border-accent hover:text-accent"
+                >
+                  {example.title}
+                  <span className="ml-1.5 text-muted">{example.outcomes.length}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

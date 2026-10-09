@@ -4,15 +4,18 @@ import {
   Handle,
   MiniMap,
   NodeToolbar,
+  Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
   type Node,
+  type NodeChange,
   type NodeProps,
+  type XYPosition,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { Edge, GraphLayout } from "./ledger.ts";
 
@@ -27,6 +30,8 @@ export type GraphNode = Readonly<{
   highlight?: string;
   // Set once the position's payout is known.
   tone?: "win" | "lose";
+  // The wallet the positions hang from, drawn differently from a position.
+  wallet?: boolean;
 }>;
 
 type PositionFlowNode = Node<{ node: GraphNode; chosen: boolean; toolbar: ReactNode }, "position">;
@@ -65,17 +70,41 @@ function Flow(props: {
 }) {
   const { slots } = props.layout;
   const { fitView } = useReactFlow();
+  // How far boxes were dragged from where the automatic layout puts them. A box that was not
+  // dragged follows the one above it, so a moved box keeps its children, old and new, under it.
+  const [moved, setMoved] = useState<ReadonlyMap<string, XYPosition>>(new Map());
+  const positions = useMemo(() => {
+    const parents = new Map<string, string>();
+    for (const edge of props.edges) if (!parents.has(edge.to)) parents.set(edge.to, edge.from);
+    const offsets = new Map<string, XYPosition>();
+    const offsetOf = (key: string): XYPosition => {
+      const known = offsets.get(key);
+      if (known) return known;
+      // Set before recursing so that a malformed, circular graph cannot loop.
+      offsets.set(key, { x: 0, y: 0 });
+      const parent = parents.get(key);
+      const offset = moved.get(key) ?? (parent === undefined ? { x: 0, y: 0 } : offsetOf(parent));
+      offsets.set(key, offset);
+      return offset;
+    };
+    const placed = new Map<string, Readonly<{ slot: XYPosition; position: XYPosition }>>();
+    for (const [key, { column, depth }] of slots) {
+      const slot = { x: column * COLUMN_WIDTH, y: depth * ROW_HEIGHT };
+      const offset = offsetOf(key);
+      placed.set(key, { slot, position: { x: slot.x + offset.x, y: slot.y + offset.y } });
+    }
+    return placed;
+  }, [slots, props.edges, moved]);
 
   const nodes = useMemo<PositionFlowNode[]>(
     () =>
       props.nodes
         .filter((node) => slots.has(node.key))
         .map((node) => {
-          const slot = slots.get(node.key)!;
           return {
             id: node.key,
             type: "position",
-            position: { x: slot.column * COLUMN_WIDTH, y: slot.depth * ROW_HEIGHT },
+            position: positions.get(node.key)!.position,
             data: {
               node,
               chosen: node.key === props.selectedKey,
@@ -85,8 +114,23 @@ function Flow(props: {
             height: NODE_HEIGHT,
           };
         }),
-    [props.nodes, slots, props.selectedKey, props.toolbar],
+    [props.nodes, slots, props.selectedKey, props.toolbar, positions],
   );
+
+  function onNodesChange(changes: readonly NodeChange<PositionFlowNode>[]) {
+    const dragged = changes.flatMap((change) => {
+      const slot = positions.get(change.type === "position" ? change.id : "")?.slot;
+      return change.type === "position" && change.position && slot
+        ? [[change.id, { x: change.position.x - slot.x, y: change.position.y - slot.y }] as const]
+        : [];
+    });
+    if (dragged.length > 0) setMoved((current) => new Map([...current, ...dragged]));
+  }
+
+  function tidy() {
+    setMoved(new Map());
+    requestAnimationFrame(() => fitView({ padding: 0.12, maxZoom: 1, duration: 250 }));
+  }
   const edges = useMemo(
     () =>
       props.edges
@@ -119,7 +163,8 @@ function Flow(props: {
         fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
         minZoom={0.25}
         maxZoom={1.5}
-        nodesDraggable={false}
+        nodeDragThreshold={4}
+        onNodesChange={onNodesChange}
         nodesConnectable={false}
         elementsSelectable={false}
         zoomOnScroll={false}
@@ -127,6 +172,17 @@ function Flow(props: {
         onNodeClick={(_, node) => props.onSelect(node.id)}
       >
         <Background gap={16} />
+        {moved.size > 0 && (
+          <Panel position="top-right">
+            <button
+              type="button"
+              onClick={tidy}
+              className="rounded-md border border-line bg-panel px-2.5 py-1 text-xs text-muted shadow-sm hover:border-accent hover:text-accent"
+            >
+              Tidy layout
+            </button>
+          </Panel>
+        )}
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable style={{ width: 120, height: 80 }} />
       </ReactFlow>
@@ -163,7 +219,13 @@ function PositionBox({ data, positionAbsoluteX, positionAbsoluteY }: NodeProps<P
       title={node.title}
       style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
       className={`flex cursor-pointer flex-col rounded-lg border px-3 py-2 text-left shadow-sm transition-colors ${
-        node.tone === "win" ? "bg-good-soft" : node.tone === "lose" ? "bg-bad-soft" : "bg-panel"
+        node.tone === "win"
+          ? "bg-good-soft"
+          : node.tone === "lose"
+            ? "bg-bad-soft"
+            : node.wallet
+              ? "bg-accent-soft"
+              : "bg-panel"
       } ${
         chosen
           ? "border-accent ring-2 ring-accent"
@@ -171,14 +233,30 @@ function PositionBox({ data, positionAbsoluteX, positionAbsoluteY }: NodeProps<P
             ? "border-good"
             : node.tone === "lose"
               ? "border-bad"
-              : node.empty
-                ? "border-dashed border-line hover:border-muted"
-                : "border-line hover:border-muted"
+              : node.wallet
+                ? "border-accent/50 hover:border-accent"
+                : node.empty
+                  ? "border-dashed border-line hover:border-muted"
+                  : "border-line hover:border-muted"
       }`}
     >
       <Handle type="target" position={Position.Top} className="graph-handle" />
       <span className="flex items-baseline justify-between gap-2 text-[11px]">
-        <span className="truncate text-muted">{node.context}</span>
+        <span
+          className={`flex min-w-0 items-center gap-1 ${node.wallet ? "text-accent" : "text-muted"}`}
+        >
+          {node.wallet && (
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              className="size-3 shrink-0 fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
+            >
+              <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" />
+              <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
+            </svg>
+          )}
+          <span className="truncate">{node.context}</span>
+        </span>
         {node.highlight && (
           <span
             className={`shrink-0 font-semibold ${

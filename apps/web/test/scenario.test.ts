@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { validatePartition } from "@cc-token/sdk";
+
 import {
   adjustBalance,
   compose,
@@ -20,6 +22,10 @@ import {
   splitPosition,
   toHex,
   type Factor,
+  boxLabel,
+  claimStatement,
+  explainClaim,
+  repetition,
 } from "../src/scenario.ts";
 import { openLedger } from "../src/ledger.ts";
 
@@ -290,4 +296,106 @@ test("adding a question splits a claim without touching collateral", () => {
 
   const options = mergeOptions(split);
   assert.ok(options.some((option) => option.result.length === 1));
+});
+
+test("a position that reuses a question is named in full, not as its last selection", () => {
+  const priceRange = SCENARIOS[0]!.conditions;
+  const sol = priceRange[0]!;
+  const on = (outcomes: readonly number[]) => ({
+    conditionId: sol.conditionId,
+    outcomeCount: sol.outcomes.length,
+    indexSet: indexSetFromOutcomes(outcomes),
+  });
+  const range = on([2]);
+  const below = on([0]);
+  const notBelow = on([1, 2, 3, 4, 5, 6, 7]);
+
+  assert.equal(repetition([range]), "none");
+  assert.equal(repetition([range, notBelow]), "overlapping");
+  assert.equal(repetition([range, below]), "exclusive");
+
+  assert.deepEqual(boxLabel(priceRange, [range]), {
+    context: "SOL/USD at expiry",
+    title: "$125 to $150",
+  });
+  assert.deepEqual(boxLabel(priceRange, [range, below]), {
+    context: "pays only on a shared result",
+    title: "($125 to $150) × (below $100)",
+  });
+  assert.equal(boxLabel(priceRange, [range, notBelow]).context, "same question twice");
+
+  assert.match(claimStatement(priceRange, [range, below]), /, multiplied by /);
+  assert.match(explainClaim(priceRange, [range, below], "USDC"), /With a single winning result/);
+  assert.doesNotMatch(explainClaim(priceRange, [range, notBelow], "USDC"), /single winning/);
+});
+
+test("different questions are still headed by the last one, given the others", () => {
+  const governance = SCENARIOS[1]!.conditions;
+  const [buyback, level] = governance;
+  const clause = (condition: typeof buyback, outcome: number) => ({
+    conditionId: condition!.conditionId,
+    outcomeCount: condition!.outcomes.length,
+    indexSet: indexSetFromOutcomes([outcome]),
+  });
+  const factors = [clause(buyback, 0), clause(level, 0)];
+  assert.equal(repetition(factors), "none");
+  assert.deepEqual(boxLabel(governance, factors), {
+    context: "given (approved)",
+    title: "$200 or more",
+  });
+  assert.match(claimStatement(governance, factors), /, and /);
+});
+
+test("three or more pieces covering every result merge to collateral in one step", () => {
+  const sol = SCENARIOS[0]!.conditions[0]!;
+  const ref = { conditionId: sol.conditionId, outcomeCount: sol.outcomes.length };
+  const on = (outcomes: readonly number[]) => indexSetFromOutcomes(outcomes);
+  // Deposit on [0..3] and [4..7], then cut the first half twice: four pieces in all.
+  let portfolio = splitPosition(
+    { collateral: 100n, holdings: [] },
+    [],
+    ref,
+    [on([0, 1, 2, 3]), on([4, 5, 6, 7])],
+    60n,
+  );
+  portfolio = splitPosition(portfolio, [], ref, [on([0, 1]), on([2, 3])], 60n);
+  portfolio = splitPosition(portfolio, [], ref, [on([0]), on([1])], 20n);
+
+  const whole = mergeOptions(portfolio).filter((option) => option.pieces.length > 2);
+  assert.equal(whole.length, 1);
+  const [option] = whole;
+  assert.equal(option!.result.length, 0);
+  // The largest set that can be formed is limited by its smallest piece.
+  assert.equal(
+    option!.amount,
+    option!.pieces.reduce((least, piece) => (piece.amount < least ? piece.amount : least), 60n),
+  );
+  assert.ok(validatePartition(ref.outcomeCount, option!.partition).isFull);
+
+  const merged = mergePositions(
+    portfolio,
+    option!.parent,
+    option!.condition,
+    option!.partition,
+    option!.amount,
+  );
+  assert.equal(merged.collateral, 40n + option!.amount);
+
+  // Two pieces are an ordinary merge, and an incomplete set is not offered.
+  const pair = splitPosition(
+    { collateral: 10n, holdings: [] },
+    [],
+    ref,
+    [on([0, 1, 2, 3]), on([4, 5, 6, 7])],
+    10n,
+  );
+  assert.ok(mergeOptions(pair).every((candidate) => candidate.pieces.length === 2));
+  const gap = {
+    ...portfolio,
+    holdings: portfolio.holdings.filter(
+      (holding) =>
+        holding.amount !== 60n || holding.factors[0]!.indexSet[0] !== on([4, 5, 6, 7])[0],
+    ),
+  };
+  assert.ok(mergeOptions(gap).every((candidate) => candidate.pieces.length === 2));
 });

@@ -16,6 +16,7 @@ import {
   attempt,
   constructionPath,
   describeClaim,
+  describeSubset,
   explainClaim,
   findCondition,
   formatTokenAmount,
@@ -25,6 +26,7 @@ import {
   outcomesInIndexSet,
   parsePayoutWeight,
   parseTokenAmount,
+  repetition,
   subtractIndexSet,
   toHex,
   type Collateral,
@@ -51,7 +53,13 @@ export type Actions = Readonly<{
   ) => void;
   redeem: (key: string, factorIndex: number) => void;
   report: (conditionKey: string, numerators: readonly bigint[]) => void;
-  resetResults: () => void;
+  // Only on the live page: exchange native shares for the position's token, and back.
+  wrap?: (key: string, amount: bigint) => void;
+  unwrap?: (key: string, amount: bigint) => void;
+  // Only on the live page: give native shares to another wallet.
+  transfer?: (key: string, recipient: string, amount: bigint) => void;
+  // Only the simulator can take a result back.
+  resetResults?: () => void;
   fail: (message: string) => void;
 }>;
 
@@ -59,8 +67,11 @@ type Workspace = Readonly<{
   collateral: Collateral;
   conditions: readonly DemoCondition[];
   ledger: Ledger;
-  market: Market;
+  // The simulated venue. There is none on the live page.
+  market: Market | null;
   marketOpen: boolean;
+  // Shares held as the position's wrapper token, by position key. Live page only.
+  wrapped?: ReadonlyMap<string, Readonly<{ amount: bigint; mint: string | null }>>;
   resolutions: Resolutions;
   actions: Actions;
 }>;
@@ -130,7 +141,8 @@ export function PositionInspector(
   const { symbol, decimals } = collateral;
   const held = balanceOf(ledger, node.key);
   const positionId = derivePositionId(collateral.mint, constructionPath(node.factors).collectionId);
-  const marketPrice = price(market, claimAtoms(market, conditions, node.factors));
+  const wrapper = props.wrapped?.get(node.key);
+  const marketPrice = market ? price(market, claimAtoms(market, conditions, node.factors)) : null;
   return (
     <Frame
       kind="Selected position"
@@ -141,7 +153,10 @@ export function PositionInspector(
       <p className="mt-2 text-sm text-muted">{props.origin}</p>
       <div className="mt-3">
         <Row label="Shares held">{formatTokenAmount(held, decimals)}</Row>
-        {props.marketOpen && (
+        {wrapper && (
+          <Row label="Wrapped as a token">{formatTokenAmount(wrapper.amount, decimals)}</Row>
+        )}
+        {props.marketOpen && marketPrice !== null && (
           <Row label="Market price">
             {marketPrice.toFixed(2)} {symbol} · {Math.round(marketPrice * 100)}%
           </Row>
@@ -153,32 +168,83 @@ export function PositionInspector(
           value={toHex(positionId)}
         />
       </div>
+      {wrapper?.mint && (
+        <div className="mt-3">
+          <Identifier label="Token mint of the wrapped shares (Token-2022)" value={wrapper.mint} />
+        </div>
+      )}
     </Frame>
   );
 }
 
-type ActionPanel = "split" | "merge" | "trade" | "redeem";
+type ActionPanel = "split" | "merge" | "trade" | "redeem" | "wrap" | "send";
+
+// Outline icons on a 24 by 24 grid, one path per stroke.
+const ACTION_ICONS: Readonly<Record<ActionPanel, readonly string[]>> = {
+  // One line forking into two.
+  split: ["M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3", "m15 9 6-6", "M16 3h5v5", "M8 3H3v5"],
+  // Two lines joining into one.
+  merge: ["M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22", "m20 22-5-5", "m8 6 4-4 4 4"],
+  // Arrows in both directions.
+  trade: ["M8 3 4 7l4 4", "M4 7h16", "m16 21 4-4-4-4", "M20 17H4"],
+  // A coin.
+  redeem: [
+    "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z",
+    "M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8",
+    "M12 18V6",
+  ],
+  // A paper plane.
+  send: [
+    "M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z",
+    "m21.854 2.147-10.94 10.939",
+  ],
+  // A box.
+  wrap: [
+    "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z",
+    "m3.3 7 8.7 5 8.7-5",
+    "M12 22V12",
+    "m7.5 4.27 9 5.15",
+  ],
+};
 
 // The buttons shown under the selected box in the graph. `node` is null for the wallet.
-export function NodeActions(props: Workspace & { node: PositionNode | null; suggested: bigint }) {
+export function NodeActions(props: Workspace & { node: PositionNode | null }) {
   const { collateral, conditions, ledger, node, resolutions, actions } = props;
   const { symbol, decimals } = collateral;
   const [open, setOpen] = useState<ActionPanel | null>(null);
   const toggle = (panel: ActionPanel) => setOpen(open === panel ? null : panel);
+  // An icon button. The label is the accessible name and shows on hover or focus.
   const tab = (panel: ActionPanel, label: string, disabled = false) => (
-    <button
-      type="button"
-      aria-expanded={open === panel}
-      disabled={disabled}
-      onClick={() => toggle(panel)}
-      className={`rounded-md border px-3 py-1 text-sm font-medium shadow-sm disabled:cursor-not-allowed disabled:border-dashed disabled:text-muted disabled:hover:border-line ${
-        open === panel
-          ? "border-accent bg-accent text-panel"
-          : "border-line bg-panel text-ink hover:border-accent hover:text-accent"
-      }`}
-    >
-      {label}
-    </button>
+    <span className="group relative">
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open === panel}
+        disabled={disabled}
+        onClick={() => toggle(panel)}
+        className={`grid size-8 place-items-center rounded-md border shadow-sm disabled:cursor-not-allowed disabled:border-dashed disabled:text-muted disabled:hover:border-line ${
+          open === panel
+            ? "border-accent bg-accent text-panel"
+            : "border-line bg-panel text-ink hover:border-accent hover:text-accent"
+        }`}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          className="size-4 fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
+        >
+          {ACTION_ICONS[panel].map((path) => (
+            <path key={path} d={path} />
+          ))}
+        </svg>
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 rounded bg-ink px-2 py-0.5 text-xs font-medium whitespace-nowrap text-page opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+      >
+        {label}
+      </span>
+    </span>
   );
   const panel = (hint: string | null, children: ReactNode) => (
     <div className="mt-2 w-80 rounded-lg border border-line bg-panel p-3 text-left shadow-lg">
@@ -196,22 +262,26 @@ export function NodeActions(props: Workspace & { node: PositionNode | null; sugg
   const merges = mergeOptions(ledger.portfolio)
     .filter(
       (option) =>
-        option.left.key === key || option.right.key === key || holdingKey(option.result) === key,
+        option.pieces.some((piece) => piece.key === key) || holdingKey(option.result) === key,
     )
-    .sort((left, right) => Number(onGraph(right)) - Number(onGraph(left)));
+    .sort(
+      (left, right) =>
+        right.pieces.length - left.pieces.length || Number(onGraph(right)) - Number(onGraph(left)),
+    );
   const mergeTab = tab("merge", "Merge", merges.length === 0);
   const mergeList = (
     <div className="flex flex-col gap-2">
       {merges.map((option) => {
         const amount = formatTokenAmount(option.amount, decimals);
         const cashOut = option.result.length === 0;
-        const left = describeClaim(conditions, option.left.factors);
-        const right = describeClaim(conditions, option.right.factors);
-        const other = option.left.key === key ? right : left;
+        const name = (pieces: MergeOption["pieces"]) =>
+          pieces.map((piece) => describeClaim(conditions, piece.factors)).join(" + ");
+        const every = name(option.pieces);
+        const other = name(option.pieces.filter((piece) => piece.key !== key));
         const into = holdingKey(option.result) === key;
         return (
           <ActionButton
-            key={`${option.left.key}:${option.right.key}`}
+            key={option.pieces.map((piece) => piece.key).join(":")}
             tone={cashOut ? "good" : "accent"}
             label={
               cashOut
@@ -222,7 +292,7 @@ export function NodeActions(props: Workspace & { node: PositionNode | null; sugg
             }
             note={
               into
-                ? `${left} + ${right}${cashOut ? ": together they cover every result, so the collateral is released" : ""}`
+                ? `${every}${cashOut ? ": together they cover every result, so the collateral is released" : ""}`
                 : cashOut
                   ? `with ${other}: together they cover every result, so the collateral is released`
                   : `with ${other} → ${describeClaim(conditions, option.result)}`
@@ -246,17 +316,14 @@ export function NodeActions(props: Workspace & { node: PositionNode | null; sugg
         {open === "split" &&
           panel(
             `Lock ${symbol} and receive two positions on one question.`,
-            <SplitEditor
-              {...props}
-              sourceKey={COLLATERAL_KEY}
-              suggested={props.suggested < free ? props.suggested : free}
-            />,
+            <SplitEditor {...props} sourceKey={COLLATERAL_KEY} />,
           )}
       </div>
     );
   }
 
   const held = balanceOf(ledger, node.key);
+  const wrappedAmount = props.wrapped?.get(node.key)?.amount ?? 0n;
   const redeemable = node.factors
     .map((factor, index) => ({
       index,
@@ -269,10 +336,34 @@ export function NodeActions(props: Workspace & { node: PositionNode | null; sugg
       <div className="flex gap-1.5">
         {tab("split", "Split", held === 0n)}
         {mergeTab}
-        {props.marketOpen && tab("trade", "Buy / Sell")}
+        {props.market && props.marketOpen && tab("trade", "Buy / Sell")}
         {redeemable.length > 0 && tab("redeem", "Redeem", held === 0n)}
+        {actions.wrap && tab("wrap", "Wrap / Unwrap", held === 0n && wrappedAmount === 0n)}
+        {actions.transfer && tab("send", "Send", held === 0n)}
       </div>
-      {open === "trade" && (
+      {open === "send" &&
+        panel(
+          "Give shares of this position to another wallet. It needs nothing set up beforehand and will find them on its Live page.",
+          <SendEditor
+            decimals={decimals}
+            held={held}
+            onSend={(recipient, amount) => actions.transfer?.(node.key, recipient, amount)}
+            onFail={actions.fail}
+          />,
+        )}
+      {open === "wrap" &&
+        panel(
+          "Wrapped shares are an ordinary Token-2022 token that other wallets and programs can hold. Unwrap them to split, merge or redeem.",
+          <WrapEditor
+            decimals={decimals}
+            held={held}
+            wrapped={wrappedAmount}
+            onWrap={(amount) => actions.wrap?.(node.key, amount)}
+            onUnwrap={(amount) => actions.unwrap?.(node.key, amount)}
+            onFail={actions.fail}
+          />,
+        )}
+      {open === "trade" && props.market && (
         <div className="mt-2 w-80 rounded-lg border border-line bg-panel p-3 text-left shadow-lg">
           <TradeTicket
             collateral={collateral}
@@ -322,12 +413,14 @@ export function ConditionInspector(
     condition: DemoCondition;
     example: readonly string[] | undefined;
     exampleNote: string;
+    // Why the result cannot be reported from here, when it cannot.
+    locked?: string;
   },
 ) {
   const { condition, market, resolutions, actions } = props;
   const index = props.conditions.findIndex((candidate) => candidate.key === condition.key);
   const reported = resolutions[condition.key];
-  const prices = outcomePrices(market, index);
+  const prices = market ? outcomePrices(market, index) : null;
   const total = reported?.reduce((sum, weight) => sum + weight, 0n) ?? 0n;
   const [weights, setWeights] = useState<readonly string[]>(
     () => props.example ?? condition.outcomes.map((_, outcome) => (outcome === 0 ? "1" : "0")),
@@ -360,7 +453,7 @@ export function ConditionInspector(
           {condition.outcomes.map((label, outcome) => {
             const share = reported
               ? Number(reported[outcome]!) / Number(total)
-              : (prices[outcome] ?? 0);
+              : (prices?.[outcome] ?? null);
             return (
               <li
                 key={label}
@@ -369,23 +462,35 @@ export function ConditionInspector(
                 <span className="truncate text-sm" title={label}>
                   {label}
                 </span>
-                <span className="h-2 overflow-hidden rounded-full bg-page">
-                  <span
-                    className={`block h-full rounded-full ${reported ? "bg-good" : "bg-accent"}`}
-                    style={{ width: `${share * 100}%` }}
-                  />
-                </span>
-                <span className="text-right font-mono text-xs">{(share * 100).toFixed(1)}%</span>
+                {share !== null && (
+                  <>
+                    <span className="h-2 overflow-hidden rounded-full bg-page">
+                      <span
+                        className={`block h-full rounded-full ${reported ? "bg-good" : "bg-accent"}`}
+                        style={{ width: `${share * 100}%` }}
+                      />
+                    </span>
+                    <span className="text-right font-mono text-xs">
+                      {(share * 100).toFixed(1)}%
+                    </span>
+                  </>
+                )}
               </li>
             );
           })}
         </ul>
         <p className="mt-2 text-xs text-muted">
           {reported
-            ? "The share of each result in the payout. On-chain a reported result is final; here you can reset it."
-            : "The simulated market's price for each result, which is its chance of being the single winner."}
+            ? `The share of each result in the payout. ${
+                actions.resetResults
+                  ? "On-chain a reported result is final; here you can reset it."
+                  : "A reported result is final."
+              }`
+            : prices
+              ? "The simulated market's price for each result, which is its chance of being the single winner."
+              : "No result has been reported yet."}
         </p>
-        {reported && (
+        {reported && actions.resetResults && (
           <button
             type="button"
             onClick={actions.resetResults}
@@ -396,7 +501,12 @@ export function ConditionInspector(
         )}
       </Section>
 
-      {!reported && (
+      {!reported && props.locked && (
+        <Section title="Report the result" hint={props.locked}>
+          {null}
+        </Section>
+      )}
+      {!reported && !props.locked && (
         <Section
           title="Report the result"
           hint={`When the question is settled, its resolver reports what happened. Positions on it can then be redeemed. ${props.exampleNote}`}
@@ -472,6 +582,152 @@ export function ConditionInspector(
   );
 }
 
+// An amount as it is typed into a field: no thousands separators.
+function plainAmount(amount: bigint, decimals: number): string {
+  return formatTokenAmount(amount, decimals).replaceAll(",", "");
+}
+
+// Shortcuts under an amount field: a quarter, half, three quarters or all of what is available.
+function Fractions(props: { max: bigint; decimals: number; onPick: (text: string) => void }) {
+  return (
+    <div className="mt-1.5 flex gap-1.5">
+      {[25n, 50n, 75n, 100n].map((percent) => (
+        <button
+          key={percent}
+          type="button"
+          disabled={props.max === 0n}
+          onClick={() => props.onPick(plainAmount((props.max * percent) / 100n, props.decimals))}
+          className="flex-1 rounded border border-line py-0.5 text-xs text-muted hover:border-accent hover:text-accent disabled:opacity-40"
+        >
+          {percent === 100n ? "Max" : `${percent}%`}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SendEditor(props: {
+  decimals: number;
+  held: bigint;
+  onSend: (recipient: string, amount: bigint) => void;
+  onFail: (message: string) => void;
+}) {
+  const [recipient, setRecipient] = useState("");
+  const [text, setText] = useState(() => plainAmount(props.held, props.decimals));
+  const available = formatTokenAmount(props.held, props.decimals);
+
+  function submit() {
+    const amount = attempt(() => {
+      const value = text.trim() === "" ? props.held : parseTokenAmount(text, props.decimals);
+      if (value <= 0n) throw new RangeError("enter a number of shares");
+      if (value > props.held) throw new RangeError(`only ${available} available`);
+      return value;
+    });
+    if (amount.ok) props.onSend(recipient.trim(), amount.value);
+    else props.onFail(amount.error);
+  }
+
+  const field = "w-0 min-w-0 flex-1 rounded-md border border-line bg-page px-2 py-1.5 font-mono";
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      <input
+        value={recipient}
+        onChange={(event) => setRecipient(event.target.value)}
+        placeholder="Recipient wallet address"
+        aria-label="Recipient wallet address"
+        spellCheck={false}
+        className={`${field} w-full flex-none text-xs`}
+      />
+      <div className="flex items-center gap-2">
+        <input
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          placeholder={`all ${available}`}
+          aria-label="Shares to send"
+          inputMode="decimal"
+          className={field}
+        />
+        <span className="text-muted">shares</span>
+        <button
+          type="button"
+          disabled={recipient.trim() === ""}
+          onClick={submit}
+          className="rounded-md bg-accent px-3 py-1.5 font-medium text-panel disabled:opacity-40"
+        >
+          Send
+        </button>
+      </div>
+      <Fractions max={props.held} decimals={props.decimals} onPick={setText} />
+    </div>
+  );
+}
+
+// Wraps native shares or unwraps tokens, one direction at a time.
+function WrapEditor(props: {
+  decimals: number;
+  held: bigint;
+  wrapped: bigint;
+  onWrap: (amount: bigint) => void;
+  onUnwrap: (amount: bigint) => void;
+  onFail: (message: string) => void;
+}) {
+  const [unwrapping, setUnwrapping] = useState(props.held === 0n);
+  const available = unwrapping ? props.wrapped : props.held;
+  const [text, setText] = useState(() => plainAmount(available, props.decimals));
+  const format = (amount: bigint) => formatTokenAmount(amount, props.decimals);
+
+  function choose(next: boolean) {
+    setUnwrapping(next);
+    setText(plainAmount(next ? props.wrapped : props.held, props.decimals));
+  }
+
+  function submit() {
+    const amount = attempt(() => {
+      const value = text.trim() === "" ? available : parseTokenAmount(text, props.decimals);
+      if (value <= 0n) throw new RangeError("enter a number of shares");
+      if (value > available) throw new RangeError(`only ${format(available)} available`);
+      return value;
+    });
+    if (!amount.ok) props.onFail(amount.error);
+    else if (unwrapping) props.onUnwrap(amount.value);
+    else props.onWrap(amount.value);
+  }
+
+  const mode = (active: boolean) =>
+    `flex-1 border-b-2 pb-1.5 text-sm font-medium ${active ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"}`;
+  return (
+    <div>
+      <div className="flex gap-4 border-b border-line">
+        <button type="button" onClick={() => choose(false)} className={mode(!unwrapping)}>
+          Wrap <span className="font-mono text-xs text-muted">{format(props.held)}</span>
+        </button>
+        <button type="button" onClick={() => choose(true)} className={mode(unwrapping)}>
+          Unwrap <span className="font-mono text-xs text-muted">{format(props.wrapped)}</span>
+        </button>
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-sm">
+        <input
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          aria-label={unwrapping ? "Shares to unwrap" : "Shares to wrap"}
+          inputMode="decimal"
+          className="w-0 min-w-0 flex-1 rounded-md border border-line bg-page px-2 py-1.5 font-mono"
+        />
+        <span className="text-muted">shares</span>
+        <button
+          type="button"
+          disabled={available === 0n}
+          onClick={submit}
+          className="rounded-md bg-accent px-3 py-1.5 font-medium text-panel disabled:opacity-40"
+        >
+          {unwrapping ? "Unwrap" : "Wrap"}
+        </button>
+      </div>
+      <Fractions max={available} decimals={props.decimals} onPick={setText} />
+    </div>
+  );
+}
+
 function ActionButton(props: {
   tone: "accent" | "good";
   label: string;
@@ -506,7 +762,7 @@ type SplitDraft = Readonly<{
   shares: string;
 }>;
 
-function SplitEditor(props: Workspace & { sourceKey: string; suggested?: bigint }) {
+function SplitEditor(props: Workspace & { sourceKey: string }) {
   const { conditions, collateral, actions } = props;
   const { portfolio } = props.ledger;
   const fromWallet = props.sourceKey === COLLATERAL_KEY;
@@ -521,10 +777,7 @@ function SplitEditor(props: Workspace & { sourceKey: string; suggested?: bigint 
       factorIndex: first === -1 ? null : first,
       conditionKey: conditions[0]!.key,
       outcomes: [],
-      shares:
-        props.suggested === undefined
-          ? ""
-          : formatTokenAmount(props.suggested, collateral.decimals).replaceAll(",", ""),
+      shares: plainAmount(available, collateral.decimals),
     };
   });
 
@@ -552,6 +805,22 @@ function SplitEditor(props: Workspace & { sourceKey: string; suggested?: bigint 
     !cutting &&
     factors.some((factor) => toHex(factor.conditionId) === toHex(condition.conditionId));
   const ready = draft.outcomes.length > 0 && draft.outcomes.length < choices.length;
+  // Pieces of a repeated question that share no result with the position's own selection.
+  const chosen = indexSetFromOutcomes(draft.outcomes);
+  const worthless =
+    repeats && ready
+      ? [chosen, complementIndexSet(condition.outcomes.length, chosen)].filter(
+          (piece) =>
+            repetition([
+              ...factors,
+              {
+                conditionId: condition.conditionId,
+                outcomeCount: condition.outcomes.length,
+                indexSet: piece,
+              },
+            ]) === "exclusive",
+        )
+      : [];
 
   function submit() {
     const amount = attempt(() =>
@@ -624,8 +893,16 @@ function SplitEditor(props: Workspace & { sourceKey: string; suggested?: bigint 
         Pick the results for the first piece. The remaining{" "}
         {cutting ? "results of this position" : `results of ${condition.title}`} form the second.
         {repeats &&
-          " This question is already part of the position, so using it again multiplies its payout share."}
+          " This question is already part of the position, so using it again multiplies its payout share instead of narrowing it."}
       </p>
+      {worthless.length > 0 && (
+        <p className="mt-2 rounded-md bg-bad-soft px-2 py-1.5 text-sm text-bad">
+          {worthless.map((piece) => `“${describeSubset(condition, piece)}”`).join(" and ")} has no
+          result in common with what this position already selects on {condition.title}. That piece
+          pays only if the result is reported as shared; with a single winning result it is worth
+          nothing.
+        </p>
+      )}
       <div className="mt-2 flex flex-wrap gap-2">
         {choices.map((outcome) => (
           <Chip
@@ -664,6 +941,11 @@ function SplitEditor(props: Workspace & { sourceKey: string; suggested?: bigint 
           {fromWallet ? "Deposit and split" : "Split"}
         </button>
       </div>
+      <Fractions
+        max={available}
+        decimals={collateral.decimals}
+        onPick={(shares) => setDraft({ ...draft, shares })}
+      />
     </div>
   );
 }
@@ -684,7 +966,12 @@ function TradeTicket(props: {
 }) {
   const { symbol, decimals } = props.collateral;
   const [selling, setSelling] = useState(false);
+  // Buying has no natural maximum in shares, so it starts from a round number.
   const [text, setText] = useState("100");
+  function choose(next: boolean) {
+    setSelling(next);
+    setText(next ? plainAmount(props.held, decimals) : "100");
+  }
   const format = (amount: bigint) => `${formatTokenAmount(amount, decimals)} ${symbol}`;
   const { members, held } = props;
   const size = attempt(() => {
@@ -745,10 +1032,10 @@ function TradeTicket(props: {
   return (
     <div>
       <div className="flex gap-4 border-b border-line">
-        <button type="button" onClick={() => setSelling(false)} className={mode(!selling)}>
+        <button type="button" onClick={() => choose(false)} className={mode(!selling)}>
           Buy
         </button>
-        <button type="button" onClick={() => setSelling(true)} className={mode(selling)}>
+        <button type="button" onClick={() => choose(true)} className={mode(selling)}>
           Sell
         </button>
       </div>
@@ -764,25 +1051,19 @@ function TradeTicket(props: {
           : `Pay ${symbol} now for shares of this position. Each pays 1 ${symbol} if it comes true. To bet the other way, select another box.`}
       </p>
 
-      <label className="my-3 flex items-center gap-2 text-sm">
-        <input
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          aria-label="Shares to trade"
-          inputMode="decimal"
-          className="w-0 min-w-0 flex-1 rounded-md border border-line bg-page px-2 py-1.5 font-mono"
-        />
-        <span className="text-muted">shares</span>
-        {selling && held > 0n && (
-          <button
-            type="button"
-            onClick={() => setText(formatTokenAmount(held, decimals).replaceAll(",", ""))}
-            className="text-accent underline"
-          >
-            Max
-          </button>
-        )}
-      </label>
+      <div className="my-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            aria-label="Shares to trade"
+            inputMode="decimal"
+            className="w-0 min-w-0 flex-1 rounded-md border border-line bg-page px-2 py-1.5 font-mono"
+          />
+          <span className="text-muted">shares</span>
+        </label>
+        {selling && <Fractions max={held} decimals={decimals} onPick={setText} />}
+      </div>
       {summary}
     </div>
   );
