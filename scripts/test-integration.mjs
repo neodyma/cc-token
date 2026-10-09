@@ -22,6 +22,11 @@ const rpcPort = 18_000 + Math.floor(Math.random() * 8_000);
 const rpcUrl = `http://127.0.0.1:${rpcPort}`;
 const websocketUrl = `ws://127.0.0.1:${rpcPort + 1}`;
 const logs = [];
+// Pass test files as arguments to run only those.
+const testFiles =
+  process.argv.length > 2
+    ? process.argv.slice(2)
+    : ["packages/sdk/test/local-validator.integration.ts", "apps/web/test/live.integration.ts"];
 
 const generated = spawnSync("pnpm", ["generate:client"], {
   cwd: root,
@@ -80,19 +85,15 @@ async function waitForValidator() {
 
 try {
   await waitForValidator();
-  const test = spawnSync(
-    process.execPath,
-    ["--experimental-strip-types", "--test", "packages/sdk/test/local-validator.integration.ts"],
-    {
-      cwd: root,
-      env: {
-        ...process.env,
-        CC_TOKEN_RPC_URL: rpcUrl,
-        CC_TOKEN_WS_URL: websocketUrl,
-      },
-      stdio: "inherit",
+  const test = spawnSync(process.execPath, ["--experimental-strip-types", "--test", ...testFiles], {
+    cwd: root,
+    env: {
+      ...process.env,
+      CC_TOKEN_RPC_URL: rpcUrl,
+      CC_TOKEN_WS_URL: websocketUrl,
     },
-  );
+    stdio: "inherit",
+  });
   if (test.error) throw test.error;
   process.exitCode = test.status ?? 1;
 } finally {
