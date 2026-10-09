@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --color-page: var(--page);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+}
+
+:root {
+  --page: #f6f5f1;
+  --panel: #ffffff;
+  --line: #e2dfd6;
+  --ink: #1c1b18;
+  --muted: #6c6a62;
+  --accent: #4338ca;
+  --accent-soft: #eceafd;
+  --good: #14734a;
+  --good-soft: #e2f4ea;
+  --bad: #a3271c;
+  --bad-soft: #fbe9e6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #131316;
+    --panel: #1c1c21;
+    --line: #2e2e36;
+    --ink: #ecebe7;
+    --muted: #9b99a3;
+    --accent: #a5b4fc;
+    --accent-soft: #272a4a;
+    --good: #6fd6a3;
+    --good-soft: #17352a;
+    --bad: #f39a8f;
+    --bad-soft: #3d1f1b;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+.react-flow {
+  --xy-background-color: var(--page);
+  --xy-background-pattern-color: var(--line);
+  --xy-edge-stroke: var(--muted);
+  --xy-minimap-background-color: var(--panel);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--page) 70%, transparent);
+  --xy-minimap-node-background-color: var(--line);
+  --xy-controls-button-background-color: var(--panel);
+  --xy-controls-button-background-color-hover: var(--accent-soft);
+  --xy-controls-button-color: var(--ink);
+  --xy-controls-button-border-color: var(--line);
+}
+
+/* Edges attach here, but nothing can be connected by hand. */
+.react-flow .graph-handle {
+  visibility: hidden;
+}

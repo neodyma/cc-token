@@ -34,6 +34,24 @@ pnpm test
 pnpm format:check
 ```
 
+## Web demo
+
+`apps/web/` is a browser demo with three pages:
+
+- **How it works** explains the protocol in plain terms.
+- **Simulator** is one interactive graph of positions: prepare questions, deposit, split, merge, trade against a simulated market maker, report results and redeem. It uses the SDK for identifiers and payouts and sends no transactions.
+- **Live** reports whether the program is deployed on devnet and whether a wallet is connected. It does not send transactions yet.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm dev:web
+```
+
+Then open <http://localhost:5173>. `pnpm build` is needed once so the program IDL exists; `pnpm dev:web` regenerates the SDK client from it and starts the Vite dev server.
+
+The wallet button targets Solana devnet. Set `VITE_SOLANA_RPC_URL` to use a different RPC endpoint.
+
 ## Devnet
 
 The deployment workflow is documented in [docs/deployment.md](docs/deployment.md). It uses the
