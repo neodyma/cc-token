@@ -40,6 +40,6 @@ The build runs the pinned Anchor CLI with `--arch v3 --tools-version v1.57`, the
 
 `[workspace.metadata.cli]` also records Solana 4.3.0 for builds and a future verifiable-build workflow. The initial devnet deployment used the ordinary pinned build recorded in [deployments/devnet.json](../deployments/devnet.json); no verifiable build has been published yet.
 
-SBPF v3 is the program binary format. Transaction v1 is the client/network message format. This toolchain supports preparing for both, but the SDK still needs a v1-capable builder and wallet, correct resource configuration, and integration tests. The core program's financial state machine does not need a different algebra for transaction v1. See [transaction v1 support](https://solana.com/upgrades/larger-transaction-sizes).
+SBPF v3 is the program binary format. Transaction v1 is the client/network message format. The SDK builds and tests both transaction formats; applications must still gate transaction v1 on wallet support and provide the required resource configuration. The core program's financial state machine does not need a different algebra for transaction v1. See [transaction v1 support](https://solana.com/upgrades/larger-transaction-sizes).
 
 The root test command builds and verifies the SBPF v3 artifact, runs host Rust and TypeScript tests, executes the compiled program through LiteSVM, and submits version 0 plus optional version 1 transactions to a pinned local validator. Build outputs, generated clients, validator ledgers and disposable wallets stay ignored.

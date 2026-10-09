@@ -79,6 +79,7 @@
 ## 6. Canonical Token-2022 wrappers
 
 - [x] Deterministic wrapper configuration
+- [ ] Token wrapper metadata
 - [x] Canonical wrapper mint per position
 - [x] Exact native-to-token wrapping
 - [x] Exact token-to-native unwrapping
@@ -130,11 +131,14 @@
 
 - [x] Vite/React application
 - [x] Browser simulator: position graph, split, merge, simulated market and redemption
-- [ ] Condition and position inspection
-- [ ] Grouped partition construction
+- [x] Condition and position inspection
+- [x] Grouped partition construction
+- [ ] Market/Scenario discovery
+- [ ] User / "receiver" flow
+- [ ] "Creator" workflow
 - [ ] Split, merge, transfer, resolve, redeem, wrap and unwrap flows
 - [ ] Native/compressed balance breakdown
-- [ ] Optional advanced multiplicative construction
+- [x] Optional advanced multiplicative construction
 - [ ] Version-0-only wallet behavior
 - [ ] Optional transaction v1 behavior
 - [ ] Browser error and interrupted-flow tests
@@ -153,3 +157,5 @@
 - [ ] Implementation-aligned architecture diagram
 - [ ] Public protocol and API documentation
 - [x] Deployment checklist, scripts and initial devnet deployment
+- [ ] Vercel deployment
+- [ ] IDL deployment
