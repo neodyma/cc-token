@@ -40,9 +40,25 @@ try {
   // Bypass older AVM launchers that parse flags before handing off to the workspace pin.
   requireVersion(anchor, anchorVersion, env);
   requireVersion("solana", solanaVersion, env);
+  const featureCheck = spawnSync(
+    "cargo",
+    ["check", "--workspace", "--all-targets", "--all-features", "--locked"],
+    { cwd: root, env, stdio: "inherit" },
+  );
+  if (featureCheck.error) throw featureCheck.error;
+  if (featureCheck.status !== 0) process.exit(featureCheck.status ?? 1);
+
   const build = spawnSync(
     anchor,
-    ["build", "--arch", "v3", "--tools-version", "v1.57", ...process.argv.slice(2)],
+    [
+      "build",
+      "--ignore-keys",
+      "--arch",
+      "v3",
+      "--tools-version",
+      "v1.57",
+      ...process.argv.slice(2),
+    ],
     { cwd: root, env, stdio: "inherit" },
   );
   if (build.error) throw build.error;

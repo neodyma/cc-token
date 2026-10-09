@@ -141,12 +141,4 @@ pub mod cc_token {
     ) -> CcTokenResult {
         wrapping::unwrap_position(ctx, args)
     }
-
-    pub fn compress_position(ctx: Context<CompressPosition>) -> CcTokenResult {
-        compression::compress_position(ctx)
-    }
-
-    pub fn decompress_position(ctx: Context<DecompressPosition>) -> CcTokenResult {
-        compression::decompress_position(ctx)
-    }
 }
