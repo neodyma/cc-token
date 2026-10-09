@@ -4,7 +4,7 @@
 - Keep [TODO.md](TODO.md) current whenever implementation work completes, changes scope, or changes the order of remaining stages.
 - Keep the Anchor workspace at the repository root; program source is in `programs/cc_token/`.
 - Future frontend code belongs in `apps/web/`; shared TypeScript client code belongs in `packages/sdk/`. Do not choose or install a frontend framework without a task that calls for it.
-- Private proposals and review notes belong in the sibling `../cc-token-local/`, never this repository. Public implementation notes may go in `docs/`.
+- Put durable public implementation notes in `docs/` and keep repository documentation self-contained.
 - Use `cargo fmt` for Rust and the root Prettier scripts for supported text files. Preserve the lockfiles; never commit generated output, wallets, or environment secrets.
 - Keep `anchor-lang` and the Anchor CLI pin aligned. `@anchor-lang/core` is a legacy web3.js client; Kit and Umi require their own IDL-generated clients.
 - Use disposable local wallets only for testing. Verify the wallet, cluster, program ID, and expected cost before any signed transaction or deployment.

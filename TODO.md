@@ -152,4 +152,4 @@
 - [x] Transaction-version and practical-capacity documentation
 - [ ] Implementation-aligned architecture diagram
 - [ ] Public protocol and API documentation
-- [ ] Deployment checklist (devnet)
+- [x] Deployment checklist and scripts (devnet; deployment pending)
