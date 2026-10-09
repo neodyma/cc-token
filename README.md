@@ -42,7 +42,7 @@ run unless `--execute` is supplied.
 
 | Cluster | Program                                                                                                                                           | Source                                                                                           |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Devnet  | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet) | [`b7ec8d7`](https://github.com/neodyma/cc-token/commit/b7ec8d783fb6d1cae1154480e90bad1fdf2ff9ce) |
+| Devnet  | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet) | [`0ea8cb3`](https://github.com/neodyma/cc-token/commit/0ea8cb372827e0e7e0c06fcaccaf07d6a5f71d98) |
 
 The complete public deployment record is in [deployments/devnet.json](deployments/devnet.json).
 

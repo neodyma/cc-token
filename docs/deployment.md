@@ -10,15 +10,15 @@ ordinary permissionless instructions.
 
 ## Current deployment
 
-| Field                  | Value                                                                                                                                                     |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cluster                | Devnet                                                                                                                                                    |
-| Program                | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet)         |
-| ProgramData            | `5yGC1NyFVmHPvz5Y7rwJVjT7mdc23unsapQWbT1WepeL`                                                                                                            |
-| Deployment slot        | `509195856`                                                                                                                                               |
-| Deployment transaction | [`2LKvrqc…M2TkM`](https://explorer.solana.com/tx/2LKvrqcV9McjkGZTvZD8mQNW8Rko3zXsMQKaHMYzSsPEahHQLcxTS2qj6yuApuwuAZWDDC13WtVcmgV8oZvM2TkM?cluster=devnet) |
-| Source                 | [`b7ec8d7`](https://github.com/neodyma/cc-token/commit/b7ec8d783fb6d1cae1154480e90bad1fdf2ff9ce)                                                          |
-| Artifact SHA-256       | `f3b7a2903cdba5d73e5fb03275fdbb9ddc0dbfacc82bae17de5bf917e160c830`                                                                                        |
+| Field                  | Value                                                                                                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cluster                | Devnet                                                                                                                                                     |
+| Program                | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet)          |
+| ProgramData            | `5yGC1NyFVmHPvz5Y7rwJVjT7mdc23unsapQWbT1WepeL`                                                                                                             |
+| Deployment slot        | `509202489`                                                                                                                                                |
+| Deployment transaction | [`2GikybZ…WqpULt`](https://explorer.solana.com/tx/2GikybZWD7PY2WtRyGSKS7TUeLamP2D9XgVaerJGbenxB8xkRFJAfC9aC3ZAbFNs8uMrjSbpqua1a1MzgcWqpULt?cluster=devnet) |
+| Source                 | [`0ea8cb3`](https://github.com/neodyma/cc-token/commit/0ea8cb372827e0e7e0c06fcaccaf07d6a5f71d98)                                                           |
+| Artifact SHA-256       | `d80c05babfbe872f63d78624a76689912a3813cb2162d3468ff3f2622e082b32`                                                                                         |
 
 The machine-readable record is [deployments/devnet.json](../deployments/devnet.json). The SDK
 exports this program address as `CC_TOKEN_PROGRAM_ADDRESS`.
