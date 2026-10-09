@@ -1,0 +1,13 @@
+{
+  "cluster": "devnet",
+  "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "programId": "JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW",
+  "programDataAddress": "5yGC1NyFVmHPvz5Y7rwJVjT7mdc23unsapQWbT1WepeL",
+  "deploymentSlot": 509195856,
+  "deploymentSignature": "2LKvrqcV9McjkGZTvZD8mQNW8Rko3zXsMQKaHMYzSsPEahHQLcxTS2qj6yuApuwuAZWDDC13WtVcmgV8oZvM2TkM",
+  "sourceCommit": "b7ec8d783fb6d1cae1154480e90bad1fdf2ff9ce",
+  "artifact": {
+    "bytes": 624184,
+    "sha256": "f3b7a2903cdba5d73e5fb03275fdbb9ddc0dbfacc82bae17de5bf917e160c830"
+  }
+}

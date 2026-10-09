@@ -38,7 +38,7 @@ pnpm format:check
 
 The build runs the pinned Anchor CLI with `--arch v3 --tools-version v1.57`, then checks `target/deploy/cc_token.so`. The verifier requires a little-endian ELF64 BPF artifact with `e_flags = 0x3`; a missing, malformed or older-version artifact fails the command. The checks inspect the actual compiler output rather than only trusting the build arguments. See [Solana's SBPF v3 guidance](https://solana.com/es/upgrades/sbpfv3-programs).
 
-`[workspace.metadata.cli]` also records Solana 4.3.0 for builds and a future verifiable-build workflow. No on-chain deployment or verifiable build has been performed.
+`[workspace.metadata.cli]` also records Solana 4.3.0 for builds and a future verifiable-build workflow. The initial devnet deployment used the ordinary pinned build recorded in [deployments/devnet.json](../deployments/devnet.json); no verifiable build has been published yet.
 
 SBPF v3 is the program binary format. Transaction v1 is the client/network message format. This toolchain supports preparing for both, but the SDK still needs a v1-capable builder and wallet, correct resource configuration, and integration tests. The core program's financial state machine does not need a different algebra for transaction v1. See [transaction v1 support](https://solana.com/upgrades/larger-transaction-sizes).
 

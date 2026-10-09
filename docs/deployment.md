@@ -8,6 +8,21 @@ The program has no global administrator or bootstrap account. Once its executabl
 users can register supported collateral, prepare conditions and construct positions through the
 ordinary permissionless instructions.
 
+## Current deployment
+
+| Field                  | Value                                                                                                                                                     |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cluster                | Devnet                                                                                                                                                    |
+| Program                | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet)         |
+| ProgramData            | `5yGC1NyFVmHPvz5Y7rwJVjT7mdc23unsapQWbT1WepeL`                                                                                                            |
+| Deployment slot        | `509195856`                                                                                                                                               |
+| Deployment transaction | [`2LKvrqc…M2TkM`](https://explorer.solana.com/tx/2LKvrqcV9McjkGZTvZD8mQNW8Rko3zXsMQKaHMYzSsPEahHQLcxTS2qj6yuApuwuAZWDDC13WtVcmgV8oZvM2TkM?cluster=devnet) |
+| Source                 | [`b7ec8d7`](https://github.com/neodyma/cc-token/commit/b7ec8d783fb6d1cae1154480e90bad1fdf2ff9ce)                                                          |
+| Artifact SHA-256       | `f3b7a2903cdba5d73e5fb03275fdbb9ddc0dbfacc82bae17de5bf917e160c830`                                                                                        |
+
+The machine-readable record is [deployments/devnet.json](../deployments/devnet.json). The SDK
+exports this program address as `CC_TOKEN_PROGRAM_ADDRESS`.
+
 ## Program identity and signers
 
 `pnpm build` writes the program ID declared by the compiled program to
@@ -96,8 +111,8 @@ provider credentials are not written to logs.
 
 Successful deployments write an ignored receipt under `target/deployments/devnet/`. It contains
 the Git commit and working-tree state, artifact hash, program ID, public authority, deployment
-result and confirmed on-chain metadata. Publish the program ID, deployed commit and verification
-result once the first deployment is complete.
+result and confirmed on-chain metadata. Public deployment records contain only the reproducibility
+and discovery fields needed by integrators.
 
 ## Verification and interrupted uploads
 

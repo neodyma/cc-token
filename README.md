@@ -40,6 +40,12 @@ The deployment workflow is documented in [docs/deployment.md](docs/deployment.md
 pinned toolchain, verifies the devnet genesis hash and built program identity, and performs a dry
 run unless `--execute` is supplied.
 
+| Cluster | Program                                                                                                                                           | Source                                                                                           |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Devnet  | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet) | [`b7ec8d7`](https://github.com/neodyma/cc-token/commit/b7ec8d783fb6d1cae1154480e90bad1fdf2ff9ce) |
+
+The complete public deployment record is in [deployments/devnet.json](deployments/devnet.json).
+
 ```sh
 pnpm deploy:devnet -- --offline
 pnpm devnet:status
