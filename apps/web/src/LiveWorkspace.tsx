@@ -106,6 +106,7 @@ type ChainState = Readonly<{
   collateral: LiveCollateral;
   positions: readonly LivePosition[];
   conditions: ReadonlyMap<string, ChainCondition>;
+  wrappedChecked: boolean;
 }>;
 
 type Entry = Readonly<{ text: string; signatures: readonly Signature[] }>;
@@ -186,6 +187,7 @@ export function LiveWorkspace(props: { owner: Address }) {
           collateral,
           positions: found.positions,
           conditions: new Map([...known, ...found.conditions]),
+          wrappedChecked: found.wrappedChecked,
         };
       });
       setChain(state);
@@ -331,7 +333,12 @@ export function LiveWorkspace(props: { owner: Address }) {
       chain={chain}
       questions={questions.current}
       busy={busy}
-      notice={failure}
+      notice={
+        <>
+          {failure}
+          {!chain.wrappedChecked && <WrappedUnchecked />}
+        </>
+      }
       history={history}
       selection={selection}
       onSelect={(next) => {
@@ -350,6 +357,16 @@ export function LiveWorkspace(props: { owner: Address }) {
   );
 }
 
+// Shown when the scan of the wallet for wrapper tokens failed. Balances are read separately.
+function WrappedUnchecked() {
+  return (
+    <p className="rounded-md bg-bad-soft px-3 py-2 text-sm text-bad">
+      Could not check this wallet for wrapped positions, so any it holds are not shown. Refresh to
+      try again.
+    </p>
+  );
+}
+
 function Setup(props: {
   owner: Address;
   busy: boolean;
@@ -359,11 +376,15 @@ function Setup(props: {
 }) {
   const [text, setText] = useState("");
   // Collateral tokens the wallet already has positions of, including ones it was only sent.
-  const [held, setHeld] = useState<Awaited<ReturnType<typeof fetchHeldCollaterals>>>([]);
+  const [found, setFound] = useState<Awaited<ReturnType<typeof fetchHeldCollaterals>>>({
+    collaterals: [],
+    wrappedChecked: true,
+  });
+  const held = found.collaterals;
   useEffect(() => {
     let current = true;
     fetchHeldCollaterals(client.rpc, props.owner).then(
-      (found) => current && setHeld(found),
+      (next) => current && setFound(next),
       () => {},
     );
     return () => {
@@ -432,6 +453,7 @@ function Setup(props: {
           </button>
         </div>
         {props.notice}
+        {!found.wrappedChecked && <WrappedUnchecked />}
       </fieldset>
     </Panel>
   );

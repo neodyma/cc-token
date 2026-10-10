@@ -105,6 +105,20 @@ async function send(
   );
 }
 
+// A node reads at most 100 accounts per request, so a longer list is read in several.
+const ACCOUNTS_PER_REQUEST = 100;
+
+export async function inBatches<TAddress, TAccount>(
+  addresses: readonly TAddress[],
+  read: (batch: TAddress[]) => Promise<readonly TAccount[]>,
+): Promise<TAccount[]> {
+  const batches: TAddress[][] = [];
+  for (let start = 0; start < addresses.length; start += ACCOUNTS_PER_REQUEST) {
+    batches.push(addresses.slice(start, start + ACCOUNTS_PER_REQUEST));
+  }
+  return (await Promise.all(batches.map(read))).flat();
+}
+
 // Setup is idempotent on-chain, but skipping what already exists saves approvals and fees.
 async function withoutExisting(
   client: LiveClient,
@@ -117,7 +131,7 @@ async function withoutExisting(
     return index === undefined ? null : (instruction.accounts?.[index]?.address ?? null);
   });
   const addresses = [...new Set(targets.filter((target) => target !== null))];
-  const accounts = await fetchEncodedAccounts(client.rpc, addresses);
+  const accounts = await inBatches(addresses, (batch) => fetchEncodedAccounts(client.rpc, batch));
   const settled = new Set<Address>(
     accounts.filter((account) => account.exists).map((account) => account.address),
   );

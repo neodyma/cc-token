@@ -5,7 +5,7 @@ import { deriveConditionId, type ConditionClause } from "@cc-token/sdk";
 import { getAddressDecoder } from "@solana/kit";
 
 import { COLLATERAL_KEY, layoutGraph } from "../src/ledger.ts";
-import { getNameTokenInstruction, TEST_TOKEN_NAME } from "../src/live/chain.ts";
+import { getNameTokenInstruction, inBatches, TEST_TOKEN_NAME } from "../src/live/chain.ts";
 import { decodeTokenLabel, ledgerFromPositions } from "../src/live/discovery.ts";
 import {
   loadQuestions,
@@ -156,6 +156,21 @@ test("the narrowest containing position is the source", () => {
     ledger.edges.map((edge) => edge.from),
     [COLLATERAL_KEY, parent, parent],
   );
+});
+
+test("long account lists are read at most 100 at a time, in order", async () => {
+  const addresses = Array.from({ length: 250 }, (_, index) => index);
+  const requests: number[] = [];
+  const accounts = await inBatches(addresses, async (batch) => {
+    requests.push(batch.length);
+    return batch.map((address) => address * 2);
+  });
+  assert.deepEqual(requests, [100, 100, 50]);
+  assert.deepEqual(
+    accounts,
+    addresses.map((address) => address * 2),
+  );
+  assert.deepEqual(await inBatches([], async () => assert.fail("nothing to read")), []);
 });
 
 test("a token's name is read from its metadata account and tied to its mint", () => {

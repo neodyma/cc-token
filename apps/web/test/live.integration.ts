@@ -85,7 +85,10 @@ test("the live page's transactions run the whole lifecycle", async () => {
   // The wording published with a question can be read back by anyone; without it, nothing.
   assert.deepEqual(await recoverQuestion(client.rpc, prepared.get(weather.key)!), weatherQuestion);
   assert.equal(await recoverQuestion(client.rpc, prepared.get(launch.key)!), null);
-  assert.deepEqual(await fetchHeldCollaterals(client.rpc, owner), []);
+  assert.deepEqual(await fetchHeldCollaterals(client.rpc, owner), {
+    collaterals: [],
+    wrappedChecked: true,
+  });
 
   const weatherRef = { conditionId: weather.conditionId, outcomeCount: 3 };
   const launchRef = { conditionId: launch.conditionId, outcomeCount: 2 };
@@ -178,6 +181,23 @@ test("the live page's transactions run the whole lifecycle", async () => {
   assert.equal((await wrappedDry())?.amount, 55n * UNIT);
   assert.equal((await wrappedDry())?.wrapped, 15n * UNIT);
 
+  // When the wallet cannot be searched for wrapper tokens, the balances are still found.
+  const withoutTokenScan = new Proxy(client.rpc, {
+    get: (rpc, method, receiver) =>
+      method === "getTokenAccountsByOwner"
+        ? () => ({ send: () => Promise.reject(new Error("too many requests")) })
+        : Reflect.get(rpc, method, receiver),
+  });
+  const unscanned = await fetchPositions(withoutTokenScan, owner, created.mint);
+  assert.equal(unscanned.wrappedChecked, false);
+  const unscannedDry = unscanned.positions.find(
+    (position) => holdingKey(position.factors) === holdingKey([dry]),
+  );
+  assert.equal(unscannedDry?.amount, 55n * UNIT);
+  assert.equal(unscannedDry?.wrapped, 0n);
+  assert.equal((await fetchHeldCollaterals(withoutTokenScan, owner)).wrappedChecked, false);
+  assert.equal((await fetchPositions(client.rpc, owner, created.mint)).wrappedChecked, true);
+
   // The token moves like any other. Someone who only ever received it sees the position and
   // can unwrap it without having held a native balance.
   const stranger = await fundedClient();
@@ -215,17 +235,19 @@ test("the live page's transactions run the whole lifecycle", async () => {
   const received = await fetchPositions(client.rpc, stranger.payer.address, created.mint);
   assert.equal(ledgerFromPositions(0n, received.positions).nodes.length, 1);
   // Starting from nothing but the wallet address: which collateral, then which question.
-  assert.deepEqual(await fetchHeldCollaterals(client.rpc, stranger.payer.address), [
-    { mint: created.mint, positions: 1, label: null },
-  ]);
+  assert.deepEqual(await fetchHeldCollaterals(client.rpc, stranger.payer.address), {
+    collaterals: [{ mint: created.mint, positions: 1, label: null }],
+    wrappedChecked: true,
+  });
   const [receivedCondition] = [...received.conditions.values()];
   assert.equal(
     (await recoverQuestion(stranger.rpc, receivedCondition!))?.title,
     weatherQuestion.title,
   );
-  assert.deepEqual(await fetchHeldCollaterals(client.rpc, owner), [
-    { mint: created.mint, positions: 3, label: null },
-  ]);
+  assert.deepEqual(await fetchHeldCollaterals(client.rpc, owner), {
+    collaterals: [{ mint: created.mint, positions: 3, label: null }],
+    wrappedChecked: true,
+  });
   await unwrap(stranger, collateral, [dry], 5n * UNIT);
   assert.equal((await wrappedDry(stranger.payer.address))?.amount, 5n * UNIT);
   assert.equal((await wrappedDry(stranger.payer.address))?.wrapped, 0n);
@@ -238,9 +260,10 @@ test("the live page's transactions run the whole lifecycle", async () => {
   await transfer(client, collateral, [dry], friend, 2n * UNIT);
   assert.equal((await wrappedDry(friend))?.amount, 5n * UNIT);
   assert.equal((await wrappedDry())?.amount, 60n * UNIT);
-  assert.deepEqual(await fetchHeldCollaterals(client.rpc, friend), [
-    { mint: created.mint, positions: 1, label: null },
-  ]);
+  assert.deepEqual(await fetchHeldCollaterals(client.rpc, friend), {
+    collaterals: [{ mint: created.mint, positions: 1, label: null }],
+    wrappedChecked: true,
+  });
   await assert.rejects(transfer(client, collateral, [dry], owner, UNIT));
   await assert.rejects(transfer(client, collateral, [dry], friend, 61n * UNIT));
 
