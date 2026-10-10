@@ -5,7 +5,7 @@ test-ledger/
 .surfpool/
 *.rs.bk
 
-# JavaScript dependencies, generated clients, and frontend outputs
+# JavaScript dependencies and frontend outputs
 node_modules/
 .pnpm-store/
 .next/
@@ -16,7 +16,6 @@ build/
 out/
 coverage/
 *.tsbuildinfo
-/packages/*/src/generated/
 
 # Local wallets and credentials
 .local/
