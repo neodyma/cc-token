@@ -8,6 +8,7 @@ import {
   createSolanaRpc,
   createSolanaRpcSubscriptions,
   createTransactionMessage,
+  fetchEncodedAccount,
   generateKeyPairSigner,
   lamports,
   pipe,
@@ -84,6 +85,7 @@ import {
   getWrapNativePositionInstruction,
   getWrapperMintAddress,
   planPayoutReport,
+  readWrapperMetadata,
   MemoryPlanCheckpointStore,
   PlanExecutionError,
   type PreparedCcTokenTransaction,
@@ -516,6 +518,32 @@ test("generated client submits the native lifecycle through v0 and v1", async ()
     (await fetchVerifiedWrapperByMint(rpc, wrapperMint)).position.address,
     verifiedWrapper.position.address,
   );
+
+  // The mint carries its own description, written by the program from the position definition.
+  const hex = (bytes: ArrayLike<number>) =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const describedMint = await fetchEncodedAccount(rpc, wrapperMint);
+  assert.ok(describedMint.exists);
+  const wrapperMetadata = readWrapperMetadata(describedMint.data);
+  assert.deepEqual(wrapperMetadata, {
+    updateAuthority: verifiedWrapper.config.address,
+    mint: wrapperMint,
+    name: `CC-T #${hex(rootPositionIds[0]!).slice(0, 8)}`,
+    symbol: "CCP",
+    uri: "",
+    fields: {
+      position_id: hex(rootPositionIds[0]!),
+      collection_id: hex(verifiedWrapper.position.data.collectionId),
+      collateral_mint: mint.address,
+    },
+  });
+  const otherMint = await fetchEncodedAccount(rpc, otherWrapperMint);
+  assert.ok(otherMint.exists);
+  assert.equal(readWrapperMetadata(otherMint.data)?.fields.position_id, hex(rootPositionIds[1]!));
+  // A plain mint, such as the collateral or an older wrapper, has none.
+  const plainMint = await fetchEncodedAccount(rpc, mint.address);
+  assert.ok(plainMint.exists);
+  assert.equal(readWrapperMetadata(plainMint.data), null);
 
   await sendInstructions(
     payer,

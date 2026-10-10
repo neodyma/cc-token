@@ -86,6 +86,7 @@
 - [x] Wrapper transfers through ordinary Token-2022 accounts
 - [x] Mint authority and supply invariants
 - [x] Reverse discovery from wrapper mint to position definition
+- [x] Wrapper mint metadata: name, symbol and position, collection and collateral identifiers (not deployed)
 - [x] Failure and rollback tests
 
 ## 7. Compression compatibility and compressed balances (deferred)

@@ -8,6 +8,8 @@ use crate::{
     prelude::*,
 };
 
+use super::wrapper::write_wrapper_metadata;
+
 #[derive(Accounts)]
 pub struct InitializeWrapper<'info> {
     #[account(mut)]
@@ -36,6 +38,7 @@ pub struct InitializeWrapper<'info> {
         mint::decimals = collateral_config.decimals,
         mint::authority = wrapper,
         mint::token_program = token_program,
+        extensions::metadata_pointer::metadata_address = mint,
         seeds = [WRAPPER_MINT_SEED, position.position_id.as_ref()],
         bump
     )]
@@ -64,6 +67,15 @@ pub fn initialize_wrapper(ctx: Context<InitializeWrapper>) -> CcTokenResult {
     let wrapper = &mut ctx.accounts.wrapper;
     if wrapper.version == 0 {
         wrapper.set_inner(initialized);
+        // The mint and its wrapper are created together, so a new wrapper means a new mint.
+        write_wrapper_metadata(
+            &ctx.accounts.position,
+            wrapper,
+            &ctx.accounts.mint.to_account_info(),
+            &ctx.accounts.payer.to_account_info(),
+            &ctx.accounts.token_program.to_account_info(),
+            &ctx.accounts.system_program.to_account_info(),
+        )?;
         emit!(WrapperInitialized {
             position_id: wrapper.position_id,
             mint: wrapper.mint,
