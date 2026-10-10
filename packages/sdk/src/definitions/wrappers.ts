@@ -1,5 +1,6 @@
 import { fetchMint, type Mint } from "@solana-program/token";
 import {
+  getAddressDecoder,
   isNone,
   isSome,
   type Account,
@@ -141,4 +142,69 @@ function requireBytes(
   ) {
     throw new DefinitionVerificationError("invalid_identity", message);
   }
+}
+
+export type WrapperMetadata = Readonly<{
+  updateAuthority: Address;
+  mint: Address;
+  name: string;
+  symbol: string;
+  uri: string;
+  // The program writes position_id, collection_id and collateral_mint.
+  fields: Readonly<Record<string, string>>;
+}>;
+
+// Token-2022 pads a mint to the size of a token account, marks the account type, then lists
+// extensions as type (u16), length (u16) and value.
+const MINT_EXTENSIONS_OFFSET = 166;
+const TOKEN_METADATA_EXTENSION = 19;
+
+/**
+ * Reads the metadata the program stores in a wrapper mint. Returns null for a mint without it,
+ * as wrappers created before metadata was added are.
+ */
+export function readWrapperMetadata(data: ReadonlyUint8Array): WrapperMetadata | null {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  let offset = MINT_EXTENSIONS_OFFSET;
+  while (offset + 4 <= data.length) {
+    const type = view.getUint16(offset, true);
+    const length = view.getUint16(offset + 2, true);
+    const start = offset + 4;
+    if (start + length > data.length) return null;
+    if (type !== TOKEN_METADATA_EXTENSION) {
+      offset = start + length;
+      continue;
+    }
+
+    let cursor = start;
+    const end = start + length;
+    const take = (size: number): ReadonlyUint8Array => {
+      if (cursor + size > end) throw new RangeError("wrapper metadata is truncated");
+      cursor += size;
+      return data.slice(cursor - size, cursor);
+    };
+    const text = (): string => {
+      const size = view.getUint32(cursor, true);
+      take(4);
+      return new TextDecoder().decode(take(size));
+    };
+    try {
+      const updateAuthority = getAddressDecoder().decode(take(32));
+      const mint = getAddressDecoder().decode(take(32));
+      const name = text();
+      const symbol = text();
+      const uri = text();
+      const count = view.getUint32(cursor, true);
+      take(4);
+      const fields: Record<string, string> = {};
+      for (let index = 0; index < count; index += 1) {
+        const key = text();
+        fields[key] = text();
+      }
+      return { updateAuthority, mint, name, symbol, uri, fields };
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }

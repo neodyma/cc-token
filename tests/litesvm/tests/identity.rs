@@ -7,7 +7,17 @@ use anchor_lang::{
 };
 use anchor_spl::{
     associated_token::{self, get_associated_token_address_with_program_id},
-    token_interface::TokenAccount,
+    token_interface::{
+        spl_token_2022::{
+            extension::{
+                metadata_pointer::MetadataPointer, BaseStateWithExtensions,
+                ExtensionType as MintExtensionType, StateWithExtensions,
+            },
+            state::Mint as Token2022Mint,
+        },
+        spl_token_metadata_interface::state::TokenMetadata,
+        TokenAccount,
+    },
 };
 use cc_token::{
     accounts,
@@ -26,7 +36,11 @@ use cc_token::{
         },
         settlement::{RedeemPositionArgs, ReportPayoutsArgs},
         setup::PrepareConditionArgs,
-        wrapping::{UnwrapPositionArgs, WrapPositionArgs},
+        wrapping::{
+            wrapper_metadata, UnwrapPositionArgs, WrapPositionArgs,
+            WRAPPER_METADATA_COLLATERAL_MINT, WRAPPER_METADATA_COLLECTION_ID,
+            WRAPPER_METADATA_NAME_PREFIX, WRAPPER_METADATA_POSITION_ID, WRAPPER_METADATA_SYMBOL,
+        },
     },
     math::IndexSet,
     state::{
@@ -3852,6 +3866,70 @@ fn wrapper_mints_are_canonical_for_semantically_distinct_positions() {
             .data,
         first_wrapper_data
     );
+
+    // Each mint describes its own position, derived from the definition and nothing else.
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|byte| format!("{byte:02x}")).collect() };
+    for position_id in [first_position_id, alternate_outcome_position_id] {
+        let mint_address = wrapper_mint_address(position_id);
+        let mint = context.svm.get_account(&mint_address).unwrap();
+        let state = StateWithExtensions::<Token2022Mint>::unpack(&mint.data).unwrap();
+        assert_eq!(
+            state.get_extension_types().unwrap(),
+            [
+                MintExtensionType::MetadataPointer,
+                MintExtensionType::TokenMetadata
+            ]
+        );
+        let pointer = state.get_extension::<MetadataPointer>().unwrap();
+        assert_eq!(
+            Option::<Pubkey>::from(pointer.metadata_address),
+            Some(mint_address)
+        );
+        assert_eq!(Option::<Pubkey>::from(pointer.authority), None);
+
+        let position = context.position(position_id);
+        let metadata = state
+            .get_variable_len_extension::<TokenMetadata>()
+            .unwrap();
+        assert_eq!(
+            metadata,
+            wrapper_metadata(&position, &wrapper_address(position_id), &mint_address)
+        );
+        assert_eq!(
+            Option::<Pubkey>::from(metadata.update_authority),
+            Some(wrapper_address(position_id))
+        );
+        assert_eq!(
+            metadata.name,
+            format!(
+                "{WRAPPER_METADATA_NAME_PREFIX}{}",
+                &hex(&position_id)[..8]
+            )
+        );
+        assert_eq!(metadata.symbol, WRAPPER_METADATA_SYMBOL);
+        assert_eq!(metadata.uri, "");
+        assert_eq!(
+            metadata.additional_metadata,
+            [
+                (WRAPPER_METADATA_POSITION_ID.to_string(), hex(&position_id)),
+                (
+                    WRAPPER_METADATA_COLLECTION_ID.to_string(),
+                    hex(&position.collection_id)
+                ),
+                (
+                    WRAPPER_METADATA_COLLATERAL_MINT.to_string(),
+                    first_collateral.to_string()
+                ),
+            ]
+        );
+        // The payer covered the larger account.
+        assert!(
+            mint.lamports
+                >= context
+                    .svm
+                    .minimum_balance_for_rent_exemption(mint.data.len())
+        );
+    }
 
     let first_collection_id = derive_collection_id(
         ROOT_COLLECTION_ID,

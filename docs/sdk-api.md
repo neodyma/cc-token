@@ -44,3 +44,33 @@ active freeze authority is classified as issuer controlled. Root deposits reject
 The issuer can freeze token accounts outside the cc-token program. Merge and redemption do not add
 a policy gate, but their token transfer can fail while the affected vault or destination account is
 frozen.
+
+## Wrapper metadata
+
+`initialize_wrapper` creates a position's Token-2022 mint with a metadata pointer to itself and
+stores token metadata in the mint, so wallets and explorers show more than an address:
+
+| Field             | Value                                                      |
+| ----------------- | ---------------------------------------------------------- |
+| name              | `CC-T #` and the first 8 hex characters of the position ID |
+| symbol            | `CCP`                                                      |
+| `position_id`     | the position ID, hex                                       |
+| `collection_id`   | the collection ID, hex                                     |
+| `collateral_mint` | the collateral mint address                                |
+
+Every value comes from the authenticated position definition; the caller supplies none. The
+wrapper config is the mint authority and the metadata update authority, and no instruction signs
+for it to change metadata, so the metadata is fixed once written. The payer of
+`initialize_wrapper` covers the rent for the larger mint. The question wording behind a position
+is not on-chain and is not part of the metadata.
+
+No link is set. Token metadata always has a URI field, and the program leaves it empty, so wallets
+show the name and symbol without an icon or description. A link would have to be derived by the
+program from the position ID, never supplied by a caller, which fixes a host name in every mint for
+good. That needs a stable host serving one JSON document per position, and is left for later.
+
+`readWrapperMetadata` decodes it from a mint account's data and returns `null` for a mint without
+it. A wrapper created before this change keeps its plain mint: it wraps and unwraps as before, has
+no metadata, and calling `initialize_wrapper` on it again fails instead of being a no-op.
+
+The program deployed on devnet does not include this yet.
