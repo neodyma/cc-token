@@ -79,14 +79,13 @@
 ## 6. Canonical Token-2022 wrappers
 
 - [x] Deterministic wrapper configuration
-- [ ] Token wrapper metadata
+- [x] Token wrapper metadata
 - [x] Canonical wrapper mint per position
 - [x] Exact native-to-token wrapping
 - [x] Exact token-to-native unwrapping
 - [x] Wrapper transfers through ordinary Token-2022 accounts
 - [x] Mint authority and supply invariants
 - [x] Reverse discovery from wrapper mint to position definition
-- [x] Wrapper mint metadata: name, symbol and position, collection and collateral identifiers (not deployed)
 - [x] Failure and rollback tests
 
 ## 7. Compression compatibility and compressed balances (deferred)

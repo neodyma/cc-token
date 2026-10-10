@@ -73,4 +73,4 @@ good. That needs a stable host serving one JSON document per position, and is le
 it. A wrapper created before this change keeps its plain mint: it wraps and unwraps as before, has
 no metadata, and calling `initialize_wrapper` on it again fails instead of being a no-op.
 
-The program deployed on devnet does not include this yet.
+This metadata format is active in the current [devnet deployment](../deployments/devnet.json).
