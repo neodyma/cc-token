@@ -60,9 +60,9 @@ export type ConditionRef = Readonly<{ conditionId: ReadonlyUint8Array; outcomeCo
 export type MergeOption = Readonly<{
   parent: readonly ConditionClause[];
   condition: ConditionRef;
-  partition: readonly [IndexSetWords, IndexSetWords];
-  left: Holding;
-  right: Holding;
+  // One selection per piece, in the same order. Two pieces, or more when they form a full set.
+  partition: readonly IndexSetWords[];
+  pieces: readonly Holding[];
   result: readonly ConditionClause[];
   amount: bigint;
 }>;
@@ -326,7 +326,58 @@ export function describeSubset(condition: DemoCondition, indexSet: IndexSetWords
   return describeOutcomes(condition, selected);
 }
 
-// The statement a position pays on, as a clause: "X is a, and Y is b".
+// Whether a position uses a question more than once, and if so whether those selections share
+// a result. When they share none, a single winning result can never satisfy all of them.
+export function repetition(
+  factors: readonly ConditionClause[],
+): "none" | "overlapping" | "exclusive" {
+  const common = new Map<string, Readonly<{ count: number; indexSet: IndexSetWords }>>();
+  for (const factor of factors) {
+    const key = toHex(factor.conditionId);
+    const seen = common.get(key);
+    common.set(key, {
+      count: (seen?.count ?? 0) + 1,
+      indexSet: seen
+        ? [
+            seen.indexSet[0] & factor.indexSet[0],
+            seen.indexSet[1] & factor.indexSet[1],
+            seen.indexSet[2] & factor.indexSet[2],
+            seen.indexSet[3] & factor.indexSet[3],
+          ]
+        : factor.indexSet,
+    });
+  }
+  const repeated = [...common.values()].filter((group) => group.count > 1);
+  if (repeated.length === 0) return "none";
+  return repeated.some((group) => group.indexSet.every((word) => word === 0n))
+    ? "exclusive"
+    : "overlapping";
+}
+
+// How a box in the graph is headed. A position that uses a question twice is named in full,
+// because it is not the plain claim on its last selection.
+export function boxLabel(
+  conditions: readonly DemoCondition[],
+  factors: readonly ConditionClause[],
+): Readonly<{ context: string; title: string }> {
+  const narrowed = factors[factors.length - 1]!;
+  const given = factors.slice(0, -1);
+  const condition = findCondition(conditions, narrowed.conditionId);
+  const repeated = repetition(factors);
+  if (repeated !== "none") {
+    return {
+      context: repeated === "exclusive" ? "pays only on a shared result" : "same question twice",
+      title: describeClaim(conditions, factors),
+    };
+  }
+  return {
+    context: given.length > 0 ? `given ${describeClaim(conditions, given)}` : condition.title,
+    title: describeSubset(condition, narrowed.indexSet),
+  };
+}
+
+// The statement a position pays on, as a clause: "X is a, and Y is b". A question used twice
+// multiplies instead, so it is not joined with "and".
 export function claimStatement(
   conditions: readonly DemoCondition[],
   factors: readonly ConditionClause[],
@@ -336,7 +387,7 @@ export function claimStatement(
       const condition = findCondition(conditions, factor.conditionId);
       return `${condition.title} is ${describeSubset(condition, factor.indexSet)}`;
     })
-    .join(", and ");
+    .join(repetition(factors) === "none" ? ", and " : ", multiplied by ");
 }
 
 // One sentence saying when a share pays.
@@ -349,10 +400,13 @@ export function explainClaim(
     const condition = findCondition(conditions, factor.conditionId);
     return `${condition.title} is ${describeSubset(condition, factor.indexSet)}`;
   });
-  const repeated =
-    new Set(factors.map((factor) => toHex(factor.conditionId))).size < factors.length;
-  return repeated
-    ? `Each share pays up to 1 ${symbol}: the payout share of “${parts.join("” multiplied by that of “")}”. A question used more than once multiplies its own share.`
+  const repeated = repetition(factors);
+  return repeated !== "none"
+    ? `Each share pays up to 1 ${symbol}: the payout share of “${parts.join("” multiplied by that of “")}”. A question used more than once multiplies its own share.${
+        repeated === "exclusive"
+          ? " These selections have no result in common, so it pays only if the result is reported as shared between them. With a single winning result it pays nothing."
+          : ""
+      }`
     : `Each share pays 1 ${symbol} if ${parts.join(", and ")}. Otherwise it pays nothing. If a result is reported as shared, it pays that share.`;
 }
 
@@ -569,6 +623,77 @@ export function mergeOptions(portfolio: Portfolio): readonly MergeOption[] {
       if (option) options.push(option);
     }
   }
+  return [...options, ...fullSetOptions(holdings)];
+}
+
+// Three or more held positions that together cover every result of a question merge in one
+// step, straight to the position above them or to collateral.
+function fullSetOptions(holdings: readonly Holding[]): readonly MergeOption[] {
+  type Member = Readonly<{ holding: Holding; indexSet: IndexSetWords }>;
+  const groups = new Map<
+    string,
+    { parent: readonly ConditionClause[]; condition: ConditionRef; members: Member[] }
+  >();
+  for (const holding of holdings) {
+    holding.factors.forEach((factor, index) => {
+      const parent = holding.factors.filter((_, other) => other !== index);
+      const key = `${holdingKey(parent)}:${toHex(factor.conditionId)}`;
+      const group = groups.get(key) ?? {
+        parent,
+        condition: { conditionId: factor.conditionId, outcomeCount: factor.outcomeCount },
+        members: [],
+      };
+      // A position that repeats this question would otherwise be listed once per repeat.
+      if (!group.members.some((member) => member.holding.key === holding.key)) {
+        group.members.push({ holding, indexSet: factor.indexSet });
+      }
+      groups.set(key, group);
+    });
+  }
+
+  const options: MergeOption[] = [];
+  for (const { parent, condition, members } of groups.values()) {
+    if (members.length < 3) continue;
+    const all = indexSetFromOutcomes(
+      Array.from({ length: condition.outcomeCount }, (_, outcome) => outcome),
+    );
+    // Depth-first exact cover: always extend with a piece holding the lowest missing result.
+    const cover = (covered: IndexSetWords, chosen: readonly Member[]): readonly Member[] | null => {
+      const missing = subtractIndexSet(all, covered);
+      if (missing.every((word) => word === 0n)) return chosen;
+      const lowest = outcomesInIndexSet(missing, condition.outcomeCount)[0]!;
+      for (const member of members) {
+        const { indexSet } = member;
+        if (!outcomesInIndexSet(indexSet, condition.outcomeCount).includes(lowest)) continue;
+        if (indexSet.some((word, index) => (word & covered[index]!) !== 0n)) continue;
+        const found = cover(
+          [
+            covered[0] | indexSet[0],
+            covered[1] | indexSet[1],
+            covered[2] | indexSet[2],
+            covered[3] | indexSet[3],
+          ],
+          [...chosen, member],
+        );
+        if (found) return found;
+      }
+      return null;
+    };
+    const set = cover([0n, 0n, 0n, 0n], []);
+    // A pair is already offered as an ordinary merge, and the program takes at most 16 pieces.
+    if (!set || set.length < 3 || set.length > 16) continue;
+    options.push({
+      parent,
+      condition,
+      partition: set.map((member) => member.indexSet),
+      pieces: set.map((member) => member.holding),
+      result: parent,
+      amount: set.reduce(
+        (least, member) => (member.holding.amount < least ? member.holding.amount : least),
+        set[0]!.holding.amount,
+      ),
+    });
+  }
   return options;
 }
 
@@ -594,8 +719,7 @@ function mergeOption(left: Holding, right: Holding): MergeOption | null {
         parent,
         condition,
         partition,
-        left,
-        right,
+        pieces: [left, right],
         result: partitionSource(parent, condition, partition),
         amount: left.amount < right.amount ? left.amount : right.amount,
       };

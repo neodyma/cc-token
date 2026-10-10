@@ -1,13 +1,15 @@
 import { CC_TOKEN_PROGRAM_ADDRESS } from "@cc-token/sdk";
 import { useConnectedWallet, WalletReadyGate } from "@solana/kit-plugin-wallet/react";
-import type { ReactNode } from "react";
+import type { Address } from "@solana/kit";
+import { useState, type ReactNode } from "react";
 
-import { Identifier, Panel } from "./components.tsx";
+import { Panel } from "./components.tsx";
+import { LiveWorkspace } from "./LiveWorkspace.tsx";
 import { ROUTES } from "./routes.ts";
 import { client, CLUSTER } from "./solana.ts";
 import { useProgramDeployed } from "./Wallet.tsx";
 
-// What the simulator does in the browser, next to the program instructions that do it on-chain.
+// What each action is on-chain. Shown until the program and a wallet are both available.
 const ACTIONS: readonly Readonly<{ action: string; detail: string; instructions: string }>[] = [
   {
     action: "Register a collateral token",
@@ -54,58 +56,80 @@ const ACTIONS: readonly Readonly<{ action: string; detail: string; instructions:
 export function Live() {
   const deployed = useProgramDeployed();
   const live = deployed.state === "ready" && deployed.value;
+  const connected = useConnectedWallet(client);
+  const ready = live && connected !== null;
+
+  const status = (
+    <ul className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-line bg-panel px-4 py-2 text-sm">
+      <Check state="ok" label="Network">
+        {CLUSTER.name}
+      </Check>
+      <Check
+        state={deployed.state === "loading" ? "pending" : live ? "ok" : "missing"}
+        label="Program"
+      >
+        <Clipped value={CC_TOKEN_PROGRAM_ADDRESS} />
+        {!live && (
+          <span className="text-muted">
+            {deployed.state === "loading"
+              ? "checking"
+              : deployed.state === "failed"
+                ? `could not reach ${CLUSTER.name}`
+                : "not deployed yet"}
+          </span>
+        )}
+      </Check>
+      <WalletReadyGate
+        client={client}
+        fallback={
+          <Check state="pending" label="Wallet">
+            <span className="text-muted">checking</span>
+          </Check>
+        }
+      >
+        <Check state={connected ? "ok" : "missing"} label="Wallet">
+          {connected ? (
+            <Clipped value={connected.account.address} />
+          ) : (
+            <span className="text-muted">not connected</span>
+          )}
+        </Check>
+      </WalletReadyGate>
+    </ul>
+  );
+
+  if (ready && connected) {
+    return (
+      <div className="flex flex-col gap-4">
+        {status}
+        <LiveWorkspace
+          key={connected.account.address}
+          owner={connected.account.address as Address}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <section>
         <h1 className="text-3xl font-semibold tracking-tight">Use the deployed program</h1>
         <p className="mt-3 text-lg text-muted">
-          This page is where the{" "}
+          Here the{" "}
           <a href={ROUTES.simulator} className="text-accent underline">
             simulator
           </a>
-          's actions become real transactions on {CLUSTER.name}, signed by your wallet. It checks
-          what is needed first.
+          's actions are real transactions on {CLUSTER.name}, signed by your wallet. It needs the
+          program deployed and a connected wallet, set to {CLUSTER.name} and holding some{" "}
+          {CLUSTER.name} SOL.
         </p>
       </section>
-
-      <Panel title="Status">
-        <ul className="flex flex-col gap-4">
-          <Check state="ok" title={`Network: ${CLUSTER.name}`}>
-            A test network. Its tokens have no value.
-          </Check>
-          <Check
-            state={deployed.state === "loading" ? "pending" : live ? "ok" : "missing"}
-            title={
-              deployed.state === "loading"
-                ? "Program: checking"
-                : deployed.state === "failed"
-                  ? `Program: could not reach ${CLUSTER.name}`
-                  : live
-                    ? "Program: deployed"
-                    : "Program: not deployed yet"
-            }
-          >
-            <Identifier label="Program address" value={CC_TOKEN_PROGRAM_ADDRESS} />
-          </Check>
-          <WalletReadyGate
-            client={client}
-            fallback={
-              <Check state="pending" title="Wallet: checking">
-                Looking for installed wallets.
-              </Check>
-            }
-          >
-            <WalletCheck />
-          </WalletReadyGate>
-        </ul>
-      </Panel>
-
+      {status}
       <Panel
         title="What will happen here"
         hint={
           live
-            ? "The program is deployed, but this page does not send transactions yet. Each action below maps to instructions the program already implements."
+            ? "Connect a wallet with the button at the top to start. Each action below maps to instructions of the deployed program."
             : `Nothing can be sent until the program is on ${CLUSTER.name}. Each action below maps to instructions the program already implements and tests locally.`
         }
       >
@@ -131,28 +155,35 @@ export function Live() {
   );
 }
 
-function WalletCheck() {
-  const connected = useConnectedWallet(client);
-  return connected ? (
-    <Check state="ok" title="Wallet: connected">
-      <span className="font-mono break-all">{connected.account.address}</span>
-    </Check>
-  ) : (
-    <Check state="missing" title="Wallet: not connected">
-      Use the Connect wallet button at the top, with the wallet set to {CLUSTER.name}.
-    </Check>
+function Check(props: { state: "ok" | "missing" | "pending"; label: string; children: ReactNode }) {
+  const dot = props.state === "ok" ? "bg-good" : props.state === "missing" ? "bg-bad" : "bg-muted";
+  return (
+    <li className="flex min-w-0 items-center gap-2">
+      <span className={`size-2 shrink-0 rounded-full ${dot}`} />
+      <span className="text-muted">{props.label}</span>
+      {props.children}
+    </li>
   );
 }
 
-function Check(props: { state: "ok" | "missing" | "pending"; title: string; children: ReactNode }) {
-  const dot = props.state === "ok" ? "bg-good" : props.state === "missing" ? "bg-bad" : "bg-muted";
+// An address shortened to its ends. The full value is in the tooltip and is copied on click.
+function Clipped(props: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    await navigator.clipboard.writeText(props.value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  }
+
   return (
-    <li className="flex gap-3">
-      <span className={`mt-1.5 size-2.5 shrink-0 rounded-full ${dot}`} />
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">{props.title}</div>
-        <div className="text-sm text-muted">{props.children}</div>
-      </div>
-    </li>
+    <button
+      type="button"
+      onClick={copy}
+      title={`${props.value} (click to copy)`}
+      className="font-mono hover:text-accent"
+    >
+      {copied ? "Copied" : `${props.value.slice(0, 4)}…${props.value.slice(-4)}`}
+    </button>
   );
 }

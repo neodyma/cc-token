@@ -4,6 +4,7 @@ import { HowItWorks } from "./HowItWorks.tsx";
 import { Live } from "./Live.tsx";
 import { ROUTES } from "./routes.ts";
 import { Simulator } from "./Simulator.tsx";
+import { Toasts } from "./toast.tsx";
 import { WalletBar } from "./Wallet.tsx";
 
 function useHash(): string {
@@ -53,6 +54,7 @@ export function App() {
       >
         {route === ROUTES.docs ? <HowItWorks /> : route === ROUTES.live ? <Live /> : <Simulator />}
       </main>
+      <Toasts />
     </>
   );
 }

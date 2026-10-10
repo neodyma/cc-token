@@ -135,9 +135,10 @@
 - [x] Condition and position inspection
 - [x] Grouped partition construction
 - [ ] Market/Scenario discovery
-- [ ] User / "receiver" flow
+- [x] User / "receiver" flow: positions and wrapped tokens sent to a wallet are found from its address, with their question wording (local validator)
 - [ ] "Creator" workflow
-- [ ] Split, merge, transfer, resolve, redeem, wrap and unwrap flows
+- [x] Split, merge, transfer, resolve, redeem, wrap and unwrap flows on the Live page (local validator)
+- [ ] Live page exercised end to end from a browser wallet on devnet
 - [ ] Native/compressed balance breakdown
 - [x] Optional advanced multiplicative construction
 - [ ] Version-0-only wallet behavior

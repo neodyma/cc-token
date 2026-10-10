@@ -40,7 +40,7 @@ pnpm format:check
 
 - **How it works** explains the protocol in plain terms.
 - **Simulator** is one interactive graph of positions: prepare questions, deposit, split, merge, trade against a simulated market maker, report results and redeem. It uses the SDK for identifiers and payouts and sends no transactions.
-- **Live** reports whether the program is deployed on devnet and whether a wallet is connected. It does not send transactions yet.
+- **Live** runs the same graph against the program deployed on devnet. With a connected wallet it creates a test collateral token, prepares questions, deposits, splits, merges, sends positions to other wallets, wraps and unwraps them as Token-2022 tokens, reports results and redeems, each as real transactions. It reads positions back from the program's accounts. See [docs/devnet.md](docs/devnet.md).
 
 ```sh
 pnpm install --frozen-lockfile
@@ -52,6 +52,9 @@ Then open <http://localhost:5173>. `pnpm build` is needed once so the program ID
 
 The wallet button targets Solana devnet. Set `VITE_SOLANA_RPC_URL` to use a different devnet RPC
 endpoint.
+
+The Live page's transactions are tested against a local validator by `pnpm test:integration`, with
+a keypair in place of the wallet. There are no automated browser tests.
 
 ## Devnet
 
