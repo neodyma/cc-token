@@ -1,5 +1,5 @@
 import { validateScenarioName, type ConditionClause } from "@cc-token/sdk";
-import type { Address, Signature } from "@solana/kit";
+import { address, type Address, type Signature } from "@solana/kit";
 import { useEffect, useRef, useState } from "react";
 
 import { describeError } from "../errors.ts";
@@ -35,6 +35,7 @@ import {
 } from "./questions.ts";
 
 const NEW = "new";
+const CUSTOM = "custom";
 // The prefix of an example's value in the question selector.
 const EXAMPLE = "example:";
 
@@ -85,6 +86,7 @@ export function CreateScenario(props: {
   const { owner, questionsKey, mintKey } = props;
   const [tokens, setTokens] = useState<readonly TokenOption[]>([]);
   const [token, setToken] = useState<string>(NEW);
+  const [customMint, setCustomMint] = useState("");
   const [tokenName, setTokenName] = useState<string>(TEST_TOKEN_NAME.name);
   const [tokenSymbol, setTokenSymbol] = useState<string>(TEST_TOKEN_NAME.symbol);
   const [known, setKnown] = useState<readonly StoredQuestion[]>([]);
@@ -105,7 +107,9 @@ export function CreateScenario(props: {
   useEffect(() => {
     let current = true;
     void (async () => {
-      const stored = localStorage.getItem(mintKey) as Address | null;
+      const storedText = localStorage.getItem(mintKey);
+      const parsed = storedText === null ? null : attempt(() => address(storedText));
+      const stored = parsed?.ok ? parsed.value : null;
       const held = await fetchHeldCollaterals(client.rpc, owner).then(
         (found) => found.collaterals,
         () => [],
@@ -160,6 +164,8 @@ export function CreateScenario(props: {
     if (token === NEW) {
       const label = tokenLabelProblem({ name: tokenName.trim(), symbol: tokenSymbol.trim() });
       if (label) return label;
+    } else if (token === CUSTOM && !attempt(() => address(customMint.trim())).ok) {
+      return "Enter a valid token mint address.";
     }
     const used = drafts.filter((draft) => draft.source !== NEW).map((draft) => draft.source);
     if (new Set(used).size < used.length) {
@@ -246,7 +252,7 @@ export function CreateScenario(props: {
         }
         mint = createdMint.current;
       } else {
-        mint = token as Address;
+        mint = token === CUSTOM ? address(customMint.trim()) : address(token);
         const collateral = await fetchCollateral(client.rpc, owner, mint);
         if (!collateral.registered) {
           await sent(
@@ -256,6 +262,7 @@ export function CreateScenario(props: {
             (signatures) => signatures,
           );
         }
+        localStorage.setItem(mintKey, mint);
       }
 
       for (const draft of fresh) {
@@ -385,6 +392,7 @@ export function CreateScenario(props: {
                 className={`mt-1 ${field}`}
               >
                 <option value={NEW}>A new test token</option>
+                <option value={CUSTOM}>Paste a token mint</option>
                 {tokens.map(({ mint, label }) => (
                   <option key={mint} value={mint}>
                     {label ? `${label.symbol || label.name} · ` : ""}
@@ -393,6 +401,17 @@ export function CreateScenario(props: {
                 ))}
               </select>
             </label>
+            {token === CUSTOM && (
+              <label className="basis-full">
+                <span className="text-muted">Token mint address</span>
+                <input
+                  value={customMint}
+                  onChange={(event) => setCustomMint(event.target.value)}
+                  placeholder="Paste a classic SPL or Token-2022 mint"
+                  className={`mt-1 font-mono ${field}`}
+                />
+              </label>
+            )}
             {token === NEW && (
               <div className="flex basis-full flex-wrap gap-2">
                 <label className="min-w-48 flex-1">
