@@ -75,6 +75,8 @@ type Workspace = Readonly<{
   // Shares held as the position's wrapper token, by position key. Live page only.
   wrapped?: ReadonlyMap<string, Readonly<{ amount: bigint; mint: string | null }>>;
   resolutions: Resolutions;
+  // The scenario this wallet already published for the selected position. Live page only.
+  published?: Readonly<{ name: string; href: string }> | null;
   actions: Actions;
 }>;
 
@@ -346,13 +348,25 @@ export function NodeActions(props: Workspace & { node: PositionNode | null }) {
         {redeemable.length > 0 && tab("redeem", "Redeem", held === 0n)}
         {actions.wrap && tab("wrap", "Wrap / Unwrap", held === 0n && wrappedAmount === 0n)}
         {actions.transfer && tab("send", "Send", held === 0n)}
-        {actions.publish && tab("publish", "Publish as scenario")}
+        {actions.publish &&
+          tab("publish", props.published ? "Published as a scenario" : "Publish as scenario")}
       </div>
       {open === "publish" &&
-        panel(
-          "Give this position a public name. Every wallet then finds it in the list of scenarios and can open it as a graph. Nothing is deposited.",
-          <PublishEditor onPublish={(name) => actions.publish?.(node.key, name)} />,
-        )}
+        (props.published
+          ? panel(
+              null,
+              <p className="text-sm">
+                You published this position as “{props.published.name}”.{" "}
+                <a href={props.published.href} className="text-accent underline">
+                  Open the scenario
+                </a>
+                , where you can also rename it.
+              </p>,
+            )
+          : panel(
+              "Give this position a public name. Every wallet then finds it in the list of scenarios and can open it as a graph. Nothing is deposited.",
+              <PublishEditor onPublish={(name) => actions.publish?.(node.key, name)} />,
+            ))}
       {open === "send" &&
         panel(
           "Give shares of this position to another wallet. It needs nothing set up beforehand and will find them on its Live page.",

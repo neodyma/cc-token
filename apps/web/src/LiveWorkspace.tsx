@@ -21,6 +21,7 @@ import {
 } from "./Inspector.tsx";
 import { balanceOf, COLLATERAL_KEY, layoutGraph } from "./ledger.ts";
 import {
+  findOwnScenario,
   merge,
   mintTestCollateral,
   nameTestCollateral,
@@ -83,8 +84,6 @@ export const TEST_TOKEN = { symbol: "TEST", decimals: 6, grant: "1000" } as cons
 
 // Everything this page remembers is scoped to the cluster and the deployed program.
 export const STORAGE = `cc-token:live:${CLUSTER.chain}:${CC_TOKEN_PROGRAM_ADDRESS}`;
-
-const HIDDEN_KEY = `${STORAGE}:hidden-questions`;
 
 // The simulator's questions, offered as starting points.
 export const EXAMPLE_QUESTIONS = [
@@ -559,16 +558,11 @@ function Workspace(props: {
   const amountOf = (amount: bigint) => formatTokenAmount(amount, decimals);
   const tokens = (amount: bigint) => `${amountOf(amount)} ${symbol}`;
 
-  // Questions cannot be deleted on-chain, only taken off this list. One that a held position
-  // uses always shows.
-  const [hidden, setHidden] = useState<readonly string[]>(() => {
-    try {
-      const stored: unknown = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]");
-      return Array.isArray(stored) ? (stored as string[]) : [];
-    } catch {
-      return [];
-    }
-  });
+  // A question is not tied to a token, so every one this browser knows could be used here.
+  // The list starts with those the positions use; others are put on it when asked for.
+  const [shown, setShown] = useState<readonly string[]>([]);
+  const show = (key: string) =>
+    setShown((current) => (current.includes(key) ? current : [...current, key]));
   const inUse = useMemo(
     () =>
       new Set(
@@ -579,16 +573,14 @@ function Workspace(props: {
     [chain.positions],
   );
   function hide(key: string) {
-    const next = [...hidden, key];
-    localStorage.setItem(HIDDEN_KEY, JSON.stringify(next));
-    setHidden(next);
+    setShown((current) => current.filter((candidate) => candidate !== key));
     if (selection.kind === "condition" && selection.key === key) {
       props.onSelect({ kind: "wallet" });
     }
   }
 
   // Questions this browser named and that exist on-chain, then any others found in positions.
-  const conditions = useMemo(() => {
+  const known = useMemo(() => {
     const named = props.questions
       .map(toCondition)
       .filter((condition) => chain.conditions.has(condition.key));
@@ -596,15 +588,16 @@ function Workspace(props: {
     const others = [...chain.conditions.values()]
       .map(unnamedCondition)
       .filter((condition) => !keys.has(condition.key));
-    // A scenario shows its own questions and those of held positions, whatever else this
-    // browser has named.
-    const featured = scenario && new Set(scenario.path.map((factor) => toHex(factor.conditionId)));
-    return [...named, ...others].filter(
+    return [...named, ...others];
+  }, [props.questions, chain.conditions]);
+  // On the list: the questions of held positions, a scenario's own, and those asked for.
+  const conditions = useMemo(() => {
+    const featured = new Set(scenario?.path.map((factor) => toHex(factor.conditionId)));
+    return known.filter(
       (condition) =>
-        inUse.has(condition.key) ||
-        (featured ? featured.has(condition.key) : !hidden.includes(condition.key)),
+        inUse.has(condition.key) || featured.has(condition.key) || shown.includes(condition.key),
     );
-  }, [props.questions, chain.conditions, hidden, inUse, scenario]);
+  }, [known, inUse, scenario, shown]);
   const resolutions: Resolutions = useMemo(
     () =>
       Object.fromEntries(
@@ -634,6 +627,33 @@ function Workspace(props: {
     selection.kind === "position"
       ? (ledger.nodes.find((node) => node.key === selection.key) ?? null)
       : null;
+  const selectedFactors = selectedNode?.factors;
+  const [ownScenario, setOwnScenario] = useState<Readonly<{
+    key: string;
+    name: string;
+    href: string;
+  }> | null>(null);
+  useEffect(() => {
+    if (!selectedFactors) return;
+    let current = true;
+    const key = holdingKey(selectedFactors);
+    findOwnScenario(client.rpc, owner, collateral.mint, selectedFactors).then(
+      (found) =>
+        current &&
+        setOwnScenario(found && { key, name: found.name, href: liveScenarioRoute(found.address) }),
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [selectedFactors, owner, collateral.mint]);
+  const published = selectedNode && ownScenario?.key === selectedNode.key ? ownScenario : null;
+  // The position a scenario page is about is published already, whoever is looking.
+  const isFeatured =
+    scenario !== undefined &&
+    selectedNode !== null &&
+    selectedNode.key === holdingKey(scenario.path);
+
   const selectedCondition =
     selection.kind === "condition"
       ? (conditions.find((condition) => condition.key === selection.key) ?? null)
@@ -782,6 +802,7 @@ function Workspace(props: {
           questionMemo(question),
         );
         props.onAddQuestion(question);
+        show(condition.key);
         props.onSelect({ kind: "condition", key: condition.key });
         return signatures;
       },
@@ -837,6 +858,7 @@ function Workspace(props: {
     }),
   ];
 
+  const { publish: _publish, ...withoutPublish } = actions;
   const workspace = {
     collateral: display,
     conditions,
@@ -845,7 +867,8 @@ function Workspace(props: {
     marketOpen: false,
     wrapped,
     resolutions,
-    actions,
+    published,
+    actions: isFeatured ? withoutPublish : actions,
   };
 
   if (!collateral.registered) {
@@ -975,7 +998,15 @@ function Workspace(props: {
           selectedKey={selectedCondition?.key ?? null}
           onSelect={(key) => props.onSelect({ kind: "condition", key })}
           // A published scenario has its questions; others are prepared on the Live page.
-          {...(scenario ? {} : { onAdd: addQuestion })}
+          {...(scenario
+            ? {}
+            : {
+                onAdd: addQuestion,
+                more: known
+                  .filter((condition) => !conditions.includes(condition))
+                  .map(({ key, title, outcomes }) => ({ key, title, outcomes: outcomes.length })),
+                onShow: show,
+              })}
           examples={EXAMPLE_QUESTIONS}
           removable={(key) => !scenario && !inUse.has(key)}
           onRemove={hide}

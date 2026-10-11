@@ -383,6 +383,20 @@ export async function publishScenario(
   return { address, signatures };
 }
 
+// The scenario this creator published for a position, if any. There is one per creator and
+// position, so publishing it again would change nothing.
+export async function findOwnScenario(
+  rpc: LiveClient["rpc"],
+  creator: Address,
+  collateralMint: Address,
+  factors: readonly ConditionClause[],
+): Promise<Readonly<{ address: Address; name: string }> | null> {
+  const positionId = derivePositionId(collateralMint, collectionIdOf(factors));
+  const [scenario] = await getScenarioAddress(creator, positionId);
+  const account = await generatedClient.fetchMaybeScenarioDefinition(rpc, scenario);
+  return account.exists ? { address: scenario, name: account.data.name } : null;
+}
+
 export async function renameScenario(
   client: LiveClient,
   anchorPositionId: ReadonlyUint8Array,
