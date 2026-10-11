@@ -1,6 +1,8 @@
-import { createClient } from "@solana/kit";
+import { createClient, extendClient } from "@solana/kit";
 import { solanaDevnetRpc } from "@solana/kit-plugin-rpc";
 import { walletSigner } from "@solana/kit-plugin-wallet";
+
+import { pacedRpc } from "./live/pacing.ts";
 
 export const CLUSTER = { name: "devnet", chain: "solana:devnet" } as const;
 
@@ -20,6 +22,9 @@ export const client = createClient()
       ...(rpcProxyEnabled ? { rpcSubscriptionsUrl: "wss://api.devnet.solana.com" } : undefined),
       transactionConfig: { version: 0 },
     }),
-  );
+  )
+  // Every read the pages make goes out a few at a time and is repeated when turned away.
+  // The payer is a getter that follows the connected wallet, which a spread would freeze.
+  .use((base) => extendClient(base, { rpc: pacedRpc(base.rpc) }));
 
 export type AppClient = typeof client;

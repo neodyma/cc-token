@@ -10,7 +10,13 @@ import {
 
 import { describeError } from "../src/errors.ts";
 import { COLLATERAL_KEY, layoutGraph } from "../src/ledger.ts";
-import { getNameTokenInstruction, inBatches, TEST_TOKEN_NAME } from "../src/live/chain.ts";
+import {
+  getNameTokenInstruction,
+  inBatches,
+  TEST_TOKEN_NAME,
+  tokenLabelProblem,
+} from "../src/live/chain.ts";
+import { createPacer, pacedRpc } from "../src/live/pacing.ts";
 import { decodeTokenLabel, ledgerFromPositions, whenAllowed } from "../src/live/discovery.ts";
 import {
   loadQuestions,
@@ -219,6 +225,118 @@ test("a read turned away by a busy endpoint is repeated, other failures are not"
   reads = 0;
   await assert.rejects(whenAllowed(read(1, 500), 4, 0));
   assert.equal(reads, 1);
+});
+
+test("requests go out a few at a time and are repeated when turned away", async () => {
+  const refused = () =>
+    new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+      headers: new Headers(),
+      message: "refused",
+      statusCode: 429,
+    });
+  const pace = createPacer({ concurrency: 2, attempts: 3, delay: 0 });
+  let active = 0;
+  let peak = 0;
+  const results = await Promise.all(
+    Array.from({ length: 7 }, (_, index) =>
+      pace(async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        active -= 1;
+        return index;
+      }),
+    ),
+  );
+  assert.deepEqual(results, [0, 1, 2, 3, 4, 5, 6]);
+  assert.equal(peak, 2);
+
+  let sends = 0;
+  const rpc = pacedRpc(
+    {
+      getSlot: () => ({
+        send: async () => {
+          sends += 1;
+          if (sends < 3) throw refused();
+          return 7n;
+        },
+      }),
+      getHealth: () => ({
+        send: async () => {
+          throw refused();
+        },
+      }),
+    },
+    pace,
+  );
+  assert.equal(await rpc.getSlot().send(), 7n);
+  assert.equal(sends, 3);
+  await assert.rejects(rpc.getHealth().send());
+  // A failure gives its place back.
+  assert.equal(await pace(async () => "free"), "free");
+});
+
+test("the same read asked for twice at once is sent once", async () => {
+  const sent: string[] = [];
+  let fail = true;
+  const rpc = pacedRpc(
+    {
+      getAccountInfo: (address: string, config?: { minContextSlot?: bigint }) => ({
+        send: async () => {
+          sent.push(`${address}:${config?.minContextSlot ?? ""}`);
+          return address;
+        },
+      }),
+      getLatestBlockhash: () => ({
+        send: async () => {
+          sent.push("blockhash");
+          return "hash";
+        },
+      }),
+      getBalance: () => ({
+        send: async () => {
+          sent.push("balance");
+          if (fail) throw new Error("unreachable");
+          return 1n;
+        },
+      }),
+    },
+    createPacer({ delay: 0 }),
+    20,
+  );
+  assert.deepEqual(
+    await Promise.all([
+      rpc.getAccountInfo("a").send(),
+      rpc.getAccountInfo("a").send(),
+      rpc.getAccountInfo("b").send(),
+      // A read after a transaction names its slot and is its own request.
+      rpc.getAccountInfo("a", { minContextSlot: 5n }).send(),
+    ]),
+    ["a", "a", "b", "a"],
+  );
+  assert.deepEqual(sent, ["a:", "b:", "a:5"]);
+
+  // After a moment the answer is no longer reused.
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  await rpc.getAccountInfo("a").send();
+  assert.equal(sent.length, 4);
+
+  // What has to be current is always sent, and a failure is not remembered.
+  await Promise.all([rpc.getLatestBlockhash().send(), rpc.getLatestBlockhash().send()]);
+  assert.equal(sent.filter((entry) => entry === "blockhash").length, 2);
+  await assert.rejects(rpc.getBalance().send());
+  fail = false;
+  assert.equal(await rpc.getBalance().send(), 1n);
+});
+
+test("a token name and symbol must fit what the metadata program stores", () => {
+  assert.equal(tokenLabelProblem(TEST_TOKEN_NAME), null);
+  assert.equal(tokenLabelProblem({ name: "a".repeat(32), symbol: "ABCDEFGHIJ" }), null);
+  assert.match(tokenLabelProblem({ name: "a".repeat(33), symbol: "A" })!, /name/);
+  assert.match(tokenLabelProblem({ name: "é".repeat(17), symbol: "A" })!, /name/);
+  assert.match(tokenLabelProblem({ name: " ", symbol: "A" })!, /name/);
+  assert.match(tokenLabelProblem({ name: "Fed rates", symbol: "ABCDEFGHIJK" })!, /symbol/);
+  assert.match(tokenLabelProblem({ name: "Fed rates", symbol: "" })!, /symbol/);
 });
 
 test("a token's name is read from its metadata account and tied to its mint", () => {
