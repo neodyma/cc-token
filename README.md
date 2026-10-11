@@ -40,7 +40,7 @@ pnpm format:check
 
 - **How it works** explains the protocol in plain terms.
 - **Simulator** is one interactive graph of positions: prepare questions, deposit, split, merge, trade against a simulated market maker, report results and redeem. It uses the SDK for identifiers and payouts and sends no transactions.
-- **Live** runs the same graph against the program deployed on devnet. With a connected wallet it creates a test collateral token, prepares questions, deposits, splits, merges, sends positions to other wallets, wraps and unwraps them as Token-2022 tokens, reports results and redeems, each as real transactions. It reads positions back from the program's accounts. See [docs/devnet.md](docs/devnet.md).
+- **Live** runs the same graph against the program deployed on devnet. It lists named scenarios directly from program accounts without requiring a wallet. With a connected wallet it can publish a zero-balance scenario anchor, create a test collateral token, prepare questions, deposit, split, merge, send positions, wrap and unwrap Token-2022 representations, report results and redeem. See [docs/devnet.md](docs/devnet.md).
 
 ```sh
 pnpm install --frozen-lockfile

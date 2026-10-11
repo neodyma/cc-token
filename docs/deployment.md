@@ -114,6 +114,34 @@ the Git commit and working-tree state, artifact hash, program ID, public authori
 result and confirmed on-chain metadata. Public deployment records contain only the reproducibility
 and discovery fields needed by integrators.
 
+## Scenario registration
+
+After a program version containing `ScenarioDefinition` is deployed, register an existing anchor
+with a dry run first:
+
+```sh
+pnpm scenario:devnet -- \
+  --deployer .local/devnet-scenario-creator.json \
+  --anchor-position-id <64_HEX_CHARACTERS> \
+  --name "Scenario name"
+```
+
+The command verifies the devnet genesis hash, deployed program, creator, canonical anchor, derived
+scenario address, balance and rent reference. Repeat the reviewed command with `--execute` to sign
+one transaction:
+
+```sh
+pnpm scenario:devnet -- \
+  --deployer .local/devnet-scenario-creator.json \
+  --anchor-position-id <64_HEX_CHARACTERS> \
+  --name "Scenario name" \
+  --execute
+```
+
+The deployer is recorded as creator and pays the descriptor rent. Repeating the same command is
+safe; an existing descriptor with another name is rejected and must be renamed by its creator.
+Pass `--rpc <URL>` for another canonical devnet endpoint.
+
 ## Verification and interrupted uploads
 
 The Solana CLI deploys through the upgradeable loader and may use many transactions for this

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { address, generateKeyPairSigner, lamports, type Account } from "@solana/kit";
+import { address, generateKeyPairSigner, lamports, type Account, type Address } from "@solana/kit";
 
 import {
   CC_TOKEN_PROGRAM_ADDRESS,
@@ -100,7 +100,7 @@ test("classifies exact and compatible participation with multiplicity", () => {
       collection: { factors: [factor(1), factor(1), factor(2)] },
     },
   } as unknown as Pick<VerifiedScenario, "anchor">;
-  const classify = (mint: typeof collateralMint, factors: readonly ConditionClause[]) =>
+  const classify = (mint: Address, factors: readonly ConditionClause[]) =>
     classifyScenarioParticipation(scenario, { collateralMint: mint, factors });
 
   assert.equal(classify(collateralMint, [factor(2), factor(1), factor(1)]), "exact");

@@ -20,8 +20,9 @@ function useHash(): string {
 export function App() {
   const hash = useHash();
   // The simulator is also the landing page.
-  const route = hash === ROUTES.docs || hash.startsWith(ROUTES.live) ? hash : ROUTES.simulator;
-  const live = route.startsWith(ROUTES.live);
+  const requestedLive = hash === ROUTES.live || hash.startsWith(`${ROUTES.live}/`);
+  const route = hash === ROUTES.docs || requestedLive ? hash : ROUTES.simulator;
+  const live = requestedLive;
 
   return (
     <>

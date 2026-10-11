@@ -133,9 +133,9 @@
 - [x] Browser simulator: position graph, split, merge, simulated market and redemption
 - [x] Condition and position inspection
 - [x] Grouped partition construction
-- [ ] Market/Scenario discovery
+- [x] Market/Scenario discovery
 - [x] User / "receiver" flow: positions and wrapped tokens sent to a wallet are found from its address, with their question wording (local validator)
-- [ ] "Creator" workflow
+- [x] "Creator" workflow
 - [x] Split, merge, transfer, resolve, redeem, wrap and unwrap flows on the Live page (local validator)
 - [ ] Live page exercised end to end from a browser wallet on devnet
 - [ ] Native/compressed balance breakdown
@@ -159,5 +159,6 @@
 - [ ] Implementation-aligned architecture diagram
 - [ ] Public protocol and API documentation
 - [x] Deployment checklist, scripts and initial devnet deployment
+- [ ] Scenario definition devnet upgrade and backfill
 - [ ] Vercel deployment
 - [ ] IDL deployment

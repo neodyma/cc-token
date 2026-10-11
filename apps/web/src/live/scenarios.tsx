@@ -45,7 +45,7 @@ export function LiveScenarioDiscovery(props: { owner?: Address }) {
           ),
         ];
         const [labels, positions] = await Promise.all([
-          fetchTokenLabels(client.rpc, mints),
+          fetchTokenLabels(client.rpc, mints).catch(() => new Map<Address, TokenLabel>()),
           props.owner
             ? Promise.all(
                 mints.map(async (mint) => {
@@ -234,7 +234,7 @@ export function LiveScenarioDetail(props: { addressText: string; owner?: Address
             };
             return [
               toHex(condition.data.conditionId),
-              await recoverQuestion(client.rpc, chainCondition),
+              await recoverQuestion(client.rpc, chainCondition).catch(() => null),
             ] as const;
           }),
         );
@@ -247,12 +247,15 @@ export function LiveScenarioDetail(props: { addressText: string; owner?: Address
         );
         let participation: ScenarioParticipation = "unrelated";
         if (props.owner) {
-          const held = await fetchPositions(
+          const positions = await fetchPositions(
             client.rpc,
             props.owner,
             scenario.anchor.position.data.collateralMint,
+          ).then(
+            (held) => held.positions,
+            () => [],
           );
-          for (const position of held.positions) {
+          for (const position of positions) {
             if (position.amount === 0n && position.wrapped === 0n) continue;
             const candidate = classifyScenarioParticipation(scenario, {
               collateralMint: scenario.anchor.position.data.collateralMint,
@@ -267,7 +270,7 @@ export function LiveScenarioDetail(props: { addressText: string; owner?: Address
         }
         const labels = await fetchTokenLabels(client.rpc, [
           scenario.anchor.position.data.collateralMint,
-        ]);
+        ]).catch(() => new Map<Address, TokenLabel>());
         if (current) {
           setDetail({
             scenario,
