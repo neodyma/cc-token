@@ -1,0 +1,183 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="title description">
+  <title id="title">cc-token protocol architecture</title>
+  <desc id="description">Canonical accounts, instruction groups, client discovery, and external Solana programs used by cc-token.</desc>
+  <defs>
+    <style>
+      .title { font: 700 28px ui-sans-serif, system-ui, sans-serif; fill: #17212b; }
+      .heading { font: 700 18px ui-sans-serif, system-ui, sans-serif; fill: #17212b; }
+      .label { font: 700 15px ui-sans-serif, system-ui, sans-serif; fill: #17212b; }
+      .body { font: 14px ui-sans-serif, system-ui, sans-serif; fill: #334155; }
+      .mono { font: 12px ui-monospace, SFMono-Regular, monospace; fill: #475569; }
+      .panel { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; rx: 16; }
+      .state { fill: #e8f7ec; stroke: #269653; stroke-width: 2; rx: 10; }
+      .instruction { fill: #f8fafc; stroke: #64748b; stroke-width: 2; rx: 10; }
+      .client { fill: #e8f1ff; stroke: #3478c9; stroke-width: 2; rx: 10; }
+      .external { fill: #f4eaff; stroke: #8b5bb5; stroke-width: 2; rx: 10; }
+      .warning { fill: #fff4e5; stroke: #d97706; stroke-width: 2; rx: 10; }
+      .arrow { fill: none; stroke: #64748b; stroke-width: 2; marker-end: url(#arrow); }
+      .read { fill: none; stroke: #3478c9; stroke-width: 2; stroke-dasharray: 7 5; marker-end: url(#blue-arrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
+    </marker>
+    <marker id="blue-arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#3478c9" />
+    </marker>
+  </defs>
+
+  <rect width="1600" height="1100" fill="#f8fafc" />
+  <text x="40" y="48" class="title">cc-token — deployed Solana architecture</text>
+  <g transform="translate(930 26)">
+    <rect class="state" x="0" y="0" width="24" height="18" /><text class="body" x="32" y="14">program state</text>
+    <rect class="instruction" x="150" y="0" width="24" height="18" /><text class="body" x="182" y="14">instruction</text>
+    <rect class="client" x="300" y="0" width="24" height="18" /><text class="body" x="332" y="14">client read</text>
+    <rect class="external" x="440" y="0" width="24" height="18" /><text class="body" x="472" y="14">external program</text>
+  </g>
+
+  <rect class="panel" x="30" y="75" width="1540" height="300" />
+  <text x="55" y="108" class="heading">Canonical identity and discovery</text>
+
+  <g transform="translate(55 135)">
+    <rect class="state" width="230" height="92" />
+    <text x="115" y="25" text-anchor="middle" class="label">CollateralConfig</text>
+    <text x="115" y="49" text-anchor="middle" class="mono">[collateral, mint]</text>
+    <text x="115" y="72" text-anchor="middle" class="body">mint · token program · vault</text>
+  </g>
+  <g transform="translate(335 135)">
+    <rect class="state" width="235" height="92" />
+    <text x="117" y="25" text-anchor="middle" class="label">PositionDefinition</text>
+    <text x="117" y="49" text-anchor="middle" class="mono">[position, position_id]</text>
+    <text x="117" y="72" text-anchor="middle" class="body">collateral + collection</text>
+  </g>
+  <g transform="translate(620 135)">
+    <rect class="state" width="250" height="92" />
+    <text x="125" y="25" text-anchor="middle" class="label">CollectionDefinition</text>
+    <text x="125" y="49" text-anchor="middle" class="mono">[collection, collection_id]</text>
+    <text x="125" y="72" text-anchor="middle" class="body">parent + condition + index set</text>
+  </g>
+  <g transform="translate(920 135)">
+    <rect class="state" width="230" height="92" />
+    <text x="115" y="25" text-anchor="middle" class="label">Condition</text>
+    <text x="115" y="49" text-anchor="middle" class="mono">[condition, condition_id]</text>
+    <text x="115" y="72" text-anchor="middle" class="body">resolver · status · payouts</text>
+  </g>
+  <g transform="translate(1200 135)">
+    <rect class="state" width="315" height="92" />
+    <text x="157" y="25" text-anchor="middle" class="label">PayoutReport</text>
+    <text x="157" y="49" text-anchor="middle" class="mono">[payout_report, condition_id]</text>
+    <text x="157" y="72" text-anchor="middle" class="body">temporary staged vector</text>
+  </g>
+
+  <path class="arrow" d="M285 181 H330" />
+  <path class="arrow" d="M570 181 H615" />
+  <path class="arrow" d="M870 181 H915" />
+  <path class="arrow" d="M1200 181 H1155" />
+
+  <g transform="translate(335 258)">
+    <rect class="state" width="235" height="88" />
+    <text x="117" y="24" text-anchor="middle" class="label">PositionBalance</text>
+    <text x="117" y="47" text-anchor="middle" class="mono">[balance, owner, position_id]</text>
+    <text x="117" y="69" text-anchor="middle" class="body">native shares</text>
+  </g>
+  <g transform="translate(620 258)">
+    <rect class="state" width="250" height="88" />
+    <text x="125" y="24" text-anchor="middle" class="label">ScenarioDefinition</text>
+    <text x="125" y="47" text-anchor="middle" class="mono">[scenario, creator, anchor]</text>
+    <text x="125" y="69" text-anchor="middle" class="body">name + anchor position</text>
+  </g>
+  <g transform="translate(920 258)">
+    <rect class="state" width="230" height="88" />
+    <text x="115" y="24" text-anchor="middle" class="label">WrapperConfig</text>
+    <text x="115" y="47" text-anchor="middle" class="mono">[wrapper, position_id]</text>
+    <text x="115" y="69" text-anchor="middle" class="body">canonical wrapper mint</text>
+  </g>
+  <g transform="translate(1200 258)">
+    <rect class="external" width="315" height="88" />
+    <text x="157" y="24" text-anchor="middle" class="label">Vault + wrapper tokens</text>
+    <text x="157" y="47" text-anchor="middle" class="body">SPL Token / Token-2022</text>
+    <text x="157" y="69" text-anchor="middle" class="body">associated token accounts</text>
+  </g>
+  <path class="arrow" d="M452 258 V232" />
+  <path class="arrow" d="M745 258 C745 238 585 238 520 230" />
+  <path class="arrow" d="M1035 258 C1035 238 615 240 540 230" />
+  <path class="arrow" d="M1150 302 H1195" />
+
+  <rect class="panel" x="30" y="400" width="1540" height="375" />
+  <text x="55" y="434" class="heading">Instruction handlers and state transitions</text>
+
+  <g transform="translate(55 465)">
+    <rect class="instruction" width="350" height="275" />
+    <text x="20" y="32" class="label">Permissionless setup</text>
+    <text x="20" y="65" class="mono">register_collateral</text>
+    <text x="20" y="91" class="mono">prepare_condition</text>
+    <text x="20" y="117" class="mono">register_collection</text>
+    <text x="20" y="143" class="mono">register_position</text>
+    <text x="20" y="169" class="mono">initialize_balance / close_balance</text>
+    <text x="20" y="204" class="label">Scenario discovery</text>
+    <text x="20" y="233" class="mono">register_scenario</text>
+    <text x="20" y="259" class="mono">update_scenario_name</text>
+  </g>
+  <g transform="translate(430 465)">
+    <rect class="instruction" width="350" height="275" />
+    <text x="20" y="32" class="label">Holder value movement</text>
+    <text x="20" y="65" class="mono">split_from_collateral</text>
+    <text x="20" y="91" class="mono">split_position</text>
+    <text x="20" y="117" class="mono">merge_positions</text>
+    <text x="20" y="143" class="mono">merge_to_collateral</text>
+    <text x="20" y="169" class="mono">transfer_position</text>
+    <text x="20" y="195" class="mono">batch_transfer_positions</text>
+    <text x="20" y="232" class="body">Full root partitions move collateral.</text>
+    <text x="20" y="255" class="body">Intermediate transitions move shares only.</text>
+  </g>
+  <g transform="translate(805 465)">
+    <rect class="instruction" width="350" height="275" />
+    <text x="20" y="32" class="label">Resolution and redemption</text>
+    <text x="20" y="65" class="mono">report_payouts</text>
+    <text x="20" y="91" class="mono">initialize / append payout report</text>
+    <text x="20" y="117" class="mono">finalize / cancel payout report</text>
+    <text x="20" y="155" class="mono">redeem_position</text>
+    <text x="20" y="181" class="mono">redeem_to_collateral</text>
+    <text x="20" y="220" class="body">Resolver signs once; finalization is irreversible.</text>
+    <text x="20" y="246" class="body">One resolved factor is removed per redemption.</text>
+  </g>
+  <g transform="translate(1180 465)">
+    <rect class="instruction" width="335" height="275" />
+    <text x="20" y="32" class="label">Token-2022 bridge</text>
+    <text x="20" y="65" class="mono">initialize_wrapper</text>
+    <text x="20" y="91" class="mono">wrap_position</text>
+    <text x="20" y="117" class="mono">unwrap_position</text>
+    <text x="20" y="158" class="body">Native shares are escrowed one-for-one.</text>
+    <text x="20" y="184" class="body">Wrapper authority is a program PDA.</text>
+    <rect class="warning" x="18" y="208" width="299" height="48" />
+    <text x="167" y="237" text-anchor="middle" class="body">Compression and market making deferred</text>
+  </g>
+
+  <rect class="panel" x="30" y="800" width="1540" height="260" />
+  <text x="55" y="834" class="heading">Client discovery and external boundaries</text>
+  <g transform="translate(55 865)">
+    <rect class="client" width="430" height="155" />
+    <text x="215" y="30" text-anchor="middle" class="label">SDK + web application</text>
+    <text x="20" y="62" class="body">1. Fetch ScenarioDefinition accounts</text>
+    <text x="20" y="87" class="body">2. Verify anchor and walk collection parents</text>
+    <text x="20" y="112" class="body">3. Intersect owner balances and wrappers</text>
+    <text x="20" y="137" class="body">4. Build read-only or connected scenario graph</text>
+  </g>
+  <g transform="translate(585 865)">
+    <rect class="external" width="400" height="155" />
+    <text x="200" y="30" text-anchor="middle" class="label">Solana programs</text>
+    <text x="20" y="62" class="body">System · SPL Token · Token-2022</text>
+    <text x="20" y="87" class="body">Associated Token · Memo</text>
+    <text x="20" y="112" class="body">Metaplex metadata for test collateral</text>
+    <text x="20" y="137" class="body">All value movement remains user-signed</text>
+  </g>
+  <g transform="translate(1085 865)">
+    <rect class="state" width="430" height="155" />
+    <text x="215" y="30" text-anchor="middle" class="label">Conservation boundary</text>
+    <text x="20" y="62" class="body">Vault collateral backs every outstanding root set.</text>
+    <text x="20" y="87" class="body">Split and merge preserve partition quantities.</text>
+    <text x="20" y="112" class="body">Wrap and unwrap preserve total position shares.</text>
+    <text x="20" y="137" class="body">No global administrator can move holder value.</text>
+  </g>
+  <path class="read" d="M485 942 H580" />
+  <path class="arrow" d="M985 942 H1080" />
+</svg>

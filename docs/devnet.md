@@ -57,3 +57,27 @@ HTTP provider.
 `pnpm test:integration` runs `apps/web/test/live.integration.ts` against a local validator loaded with the compiled program. It uses the same Kit client stack as the browser with a generated keypair in place of the wallet, and covers test collateral, three questions, multiple zero-balance scenario publications, discovery, renaming, one position participating in two scenarios, scenario graph filtering, creation against a pasted mint the creator does not hold, deposit, narrowing, combining, each kind of merge, sending native shares to a new address, wrapping, unwrapping, a wrapped token sent to and unwrapped by another wallet, an unauthorized report, both reports, redemption to a residual position and to collateral, and resuming an interrupted featured-position acquisition without depositing twice.
 
 By hand, on 2026-10-09, from Phantom on devnet: creating a test token, preparing questions, deposits, splits, reporting results and redeeming. Sending, wrapping, unwrapping and naming a token have not been confirmed from a browser, and there are no automated browser tests.
+
+## Deployed-program submission test
+
+`pnpm test:devnet` targets the deployed program rather than starting a local validator. It requires
+an explicit disposable keypair and performs a read-only preflight unless `--execute` is present.
+Use a dedicated RPC through environment variables when available:
+
+```sh
+export CC_TOKEN_DEVNET_RPC_URL="https://your-devnet-rpc"
+export CC_TOKEN_DEVNET_WS_URL="wss://your-devnet-websocket"
+
+pnpm test:devnet -- --payer .local/devnet-test-payer.json
+pnpm test:devnet -- --payer .local/devnet-test-payer.json --execute
+```
+
+The payer must hold at least 0.25 devnet SOL. The test verifies the cluster and deployed program,
+then creates test collateral, prepares two conditions, publishes one named scenario, splits and
+refines collateral, transfers and wraps a position, reports payouts, redeems every claim, and
+closes zero-valued native balance accounts. It leaves the scenario and immutable definition
+accounts on devnet. A successful run writes public addresses and confirmed transaction signatures
+to an ignored JSON receipt under `target/devnet-tests/`.
+
+Custom RPC credentials stay in the environment. The command redacts RPC paths and query strings
+from its output and never prints keypair contents.

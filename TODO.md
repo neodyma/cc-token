@@ -159,8 +159,8 @@
 - [ ] Rounding and resolution documentation
 - [ ] Compression availability documentation (deferred)
 - [x] Transaction-version and practical-capacity documentation
-- [ ] Implementation-aligned architecture diagram
-- [ ] Public protocol and API documentation
+- [x] Implementation-aligned architecture diagram
+- [x] Public protocol and API documentation
 - [x] Deployment checklist, scripts and initial devnet deployment
 - [x] Scenario definition devnet upgrade and initial backfill
 - [x] Vercel deployment
