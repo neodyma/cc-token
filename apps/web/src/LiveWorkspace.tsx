@@ -11,7 +11,9 @@ import { Panel } from "./components.tsx";
 import { describeError } from "./errors.ts";
 import {
   ConditionInspector,
+  Fractions,
   NodeActions,
+  plainAmount,
   PositionInspector,
   WalletInspector,
   type Actions,
@@ -19,7 +21,6 @@ import {
 } from "./Inspector.tsx";
 import { balanceOf, COLLATERAL_KEY, layoutGraph } from "./ledger.ts";
 import {
-  createTestCollateral,
   merge,
   mintTestCollateral,
   nameTestCollateral,
@@ -29,6 +30,7 @@ import {
   registerCollateral,
   reportPayouts,
   split,
+  takePosition,
   TEST_TOKEN_NAME,
   transfer,
   unwrap,
@@ -56,7 +58,7 @@ import {
   type StoredQuestion,
 } from "./live/questions.ts";
 import { PositionGraph, type GraphNode } from "./PositionGraph.tsx";
-import { liveScenarioRoute, ROUTES } from "./routes.ts";
+import { liveScenarioRoute, liveTokenRoute, ROUTES } from "./routes.ts";
 import {
   attempt,
   boxLabel,
@@ -64,8 +66,10 @@ import {
   findCondition,
   formatTokenAmount,
   holdingKey,
+  outcomesInIndexSet,
   parseTokenAmount,
   partitionSource,
+  repetition,
   SCENARIOS,
   simulateRedemption,
   toHex,
@@ -75,15 +79,15 @@ import { Questions } from "./Simulator.tsx";
 import { client, CLUSTER } from "./solana.ts";
 import { showToast } from "./toast.tsx";
 
-const TEST_TOKEN = { symbol: "TEST", decimals: 6, grant: "1000" } as const;
+export const TEST_TOKEN = { symbol: "TEST", decimals: 6, grant: "1000" } as const;
 
 // Everything this page remembers is scoped to the cluster and the deployed program.
-const STORAGE = `cc-token:live:${CLUSTER.chain}:${CC_TOKEN_PROGRAM_ADDRESS}`;
+export const STORAGE = `cc-token:live:${CLUSTER.chain}:${CC_TOKEN_PROGRAM_ADDRESS}`;
 
 const HIDDEN_KEY = `${STORAGE}:hidden-questions`;
 
 // The simulator's questions, offered as starting points.
-const EXAMPLE_QUESTIONS = [
+export const EXAMPLE_QUESTIONS = [
   ...new Map(
     SCENARIOS.flatMap((scenario) => scenario.conditions).map((condition) => [
       `${condition.title}:${condition.outcomes.join()}`,
@@ -106,7 +110,7 @@ type ChainState = Readonly<{
 
 type Entry = Readonly<{ text: string; signatures: readonly Signature[] }>;
 
-function transactionLinks(signatures: readonly Signature[]) {
+export function transactionLinks(signatures: readonly Signature[]) {
   return signatures.map((signature, index) => ({
     href: `https://explorer.solana.com/tx/${signature}?cluster=${CLUSTER.name}`,
     label: signatures.length > 1 ? `tx ${index + 1}` : "tx",
@@ -117,14 +121,28 @@ function shorten(value: string): string {
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 
-export function LiveWorkspace(props: { owner: Address }) {
+// A published scenario the workspace was opened for: its collateral token and the featured
+// position, as the questions to split on in order.
+export type ScenarioEntry = Readonly<{
+  name: string;
+  mint: Address;
+  path: readonly ConditionClause[];
+}>;
+
+// The graph opens for a scenario or for a token named in the address bar. With neither, this
+// only offers the tokens to open.
+export function LiveWorkspace(props: {
+  owner: Address;
+  scenario?: ScenarioEntry;
+  token?: Address;
+}) {
   const { owner } = props;
+  // The component is remounted for another scenario, so the first one stays for its lifetime.
+  const scenario = useRef(props.scenario).current;
   const mintKey = `${STORAGE}:${owner}:mint`;
   const questionsKey = `${STORAGE}:questions`;
 
-  const [mint, setMint] = useState<Address | null>(
-    () => (localStorage.getItem(mintKey) as Address | null) ?? null,
-  );
+  const mint: Address | null = scenario?.mint ?? props.token ?? null;
   // Read by `refresh` right after a question is added, before React has re-rendered.
   const questions = useRef<readonly StoredQuestion[]>(loadQuestions(localStorage, questionsKey));
   const [chain, setChain] = useState<ChainState | null>(null);
@@ -159,7 +177,11 @@ export function LiveWorkspace(props: { owner: Address }) {
           fetchPositions(client.rpc, owner, target, config),
           fetchConditions(
             client.rpc,
-            questions.current.map((question) => toCondition(question).conditionId),
+            [
+              ...questions.current.map((question) => toCondition(question).conditionId),
+              // Shown even while the wallet holds nothing on them.
+              ...(scenario?.path ?? []).map((factor) => factor.conditionId),
+            ],
             config,
           ),
         ]);
@@ -198,7 +220,7 @@ export function LiveWorkspace(props: { owner: Address }) {
       saveQuestions(localStorage, questionsKey, questions.current);
       setChain({ ...state });
     },
-    [owner, questionsKey],
+    [owner, questionsKey, scenario],
   );
 
   useEffect(() => {
@@ -245,38 +267,11 @@ export function LiveWorkspace(props: { owner: Address }) {
     setBusy(null);
   }
 
+  // The token is part of the address, so choosing or leaving one is a change of page. The
+  // last one opened is remembered as the default for a new scenario.
   function chooseMint(next: Address | null) {
     if (next) localStorage.setItem(mintKey, next);
-    else localStorage.removeItem(mintKey);
-    setChain(null);
-    setSelection({ kind: "wallet" });
-    setMint(next);
-  }
-
-  function createToken() {
-    const amount = parseTokenAmount(TEST_TOKEN.grant, TEST_TOKEN.decimals);
-    const done = `Created a test token, minted ${TEST_TOKEN.grant} of it and registered it as collateral.`;
-    void (async () => {
-      setBusy("Creating a test token");
-      setProblem(null);
-      const toast = showToast({
-        tone: "pending",
-        text: "Creating a test token: approve it in your wallet.",
-      });
-      try {
-        const created = await createTestCollateral(client, amount, TEST_TOKEN.decimals);
-        await noteSent(created.signatures);
-        setHistory((entries) => [...entries, { text: done, signatures: created.signatures }]);
-        showToast({ tone: "good", text: done, links: transactionLinks(created.signatures) }, toast);
-        chooseMint(created.mint);
-      } catch (error) {
-        showToast(
-          { tone: "bad", text: `The token was not created. ${describeError(error)}` },
-          toast,
-        );
-      }
-      setBusy(null);
-    })();
+    window.location.hash = next ? liveTokenRoute(next) : ROUTES.live;
   }
 
   const failure = problem && (
@@ -284,31 +279,31 @@ export function LiveWorkspace(props: { owner: Address }) {
   );
 
   if (!mint) {
-    return (
-      <Setup
-        owner={owner}
-        busy={busy !== null}
-        notice={failure}
-        onCreate={createToken}
-        onUse={(text) => {
-          const parsed = attempt(() => address(text.trim()));
-          if (parsed.ok) chooseMint(parsed.value);
-          else setProblem("That is not a token address.");
-        }}
-      />
-    );
+    return <HeldTokens owner={owner} onOpen={chooseMint} />;
   }
 
   if (!chain) {
     return (
       <Panel title="Positions">
         {failure ?? <p className="text-sm text-muted">Reading your positions from devnet…</p>}
+        {failure && (
+          <button
+            type="button"
+            onClick={() => {
+              setProblem(null);
+              refresh(mint).catch((error: unknown) => setProblem(describeError(error)));
+            }}
+            className="mt-3 mr-4 text-sm text-accent underline"
+          >
+            Try again
+          </button>
+        )}
         <button
           type="button"
           onClick={() => chooseMint(null)}
           className="mt-3 text-sm text-accent underline"
         >
-          Use another token
+          {scenario ? "All scenarios" : "Use another token"}
         </button>
       </Panel>
     );
@@ -318,6 +313,7 @@ export function LiveWorkspace(props: { owner: Address }) {
     <Workspace
       owner={owner}
       chain={chain}
+      scenario={scenario}
       questions={questions.current}
       busy={busy}
       notice={
@@ -370,20 +366,13 @@ function WrappedUnchecked() {
   );
 }
 
-function Setup(props: {
-  owner: Address;
-  busy: boolean;
-  notice: ReactNode;
-  onCreate: () => void;
-  onUse: (mint: string) => void;
-}) {
-  const [text, setText] = useState("");
-  // Collateral tokens the wallet already has positions of, including ones it was only sent.
+// The tokens the wallet holds positions of, including ones it was only sent. This is the way
+// to positions that belong to no published scenario. Nothing is shown to a wallet without any.
+function HeldTokens(props: { owner: Address; onOpen: (mint: Address) => void }) {
   const [found, setFound] = useState<Awaited<ReturnType<typeof fetchHeldCollaterals>>>({
     collaterals: [],
     wrappedChecked: true,
   });
-  const held = found.collaterals;
   useEffect(() => {
     let current = true;
     fetchHeldCollaterals(client.rpc, props.owner).then(
@@ -395,76 +384,148 @@ function Setup(props: {
     };
   }, [props.owner]);
 
+  if (found.collaterals.length === 0 && found.wrappedChecked) return null;
   return (
     <Panel
-      title="Choose a collateral token"
-      hint="Positions are backed by a token locked in the program's vault. On devnet the simplest choice is a throwaway token that your wallet can mint."
+      title="Your positions"
+      hint="Everything this wallet holds, by the token that backs it, including positions outside any scenario such as ones you were sent."
     >
-      <fieldset disabled={props.busy} className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
-        {held.length > 0 && (
-          <div>
-            <p className="text-sm font-medium">This wallet already holds positions</p>
-            <ul className="mt-2 flex flex-col gap-2">
-              {held.map(({ mint, positions, label }) => (
-                <li key={mint}>
-                  <button
-                    type="button"
-                    onClick={() => props.onUse(mint)}
-                    title={mint}
-                    className="flex w-full items-center gap-3 rounded-lg border border-line px-3 py-2 text-left text-sm hover:border-accent"
-                  >
-                    {label && <span className="font-medium">{label.symbol || label.name}</span>}
-                    <span className="font-mono text-xs text-muted">{shorten(mint)}</span>
-                    <span className="text-muted">
-                      {positions} {positions === 1 ? "position" : "positions"} backed by this token
-                    </span>
-                    <span className="ml-auto text-accent">Open</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <div>
-          <button
-            type="button"
-            onClick={props.onCreate}
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-panel disabled:opacity-40"
-          >
-            Create a test token
-          </button>
-          <p className="mt-1 text-sm text-muted">
-            One transaction: creates the token, mints {TEST_TOKEN.grant} {TEST_TOKEN.symbol} to your
-            wallet and registers it as collateral. It costs a little devnet SOL in rent.
-          </p>
+      <ul className="flex flex-col gap-2">
+        {found.collaterals.map(({ mint, positions, label }) => (
+          <li key={mint}>
+            <button
+              type="button"
+              onClick={() => props.onOpen(mint)}
+              title={mint}
+              className="flex w-full items-center gap-3 rounded-lg border border-line px-3 py-2 text-left text-sm hover:border-accent"
+            >
+              {label && <span className="font-medium">{label.symbol || label.name}</span>}
+              <span className="font-mono text-xs text-muted">{shorten(mint)}</span>
+              <span className="text-muted">
+                {positions} {positions === 1 ? "position" : "positions"} backed by this token
+              </span>
+              <span className="ml-auto text-accent">Open as a graph</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {!found.wrappedChecked && (
+        <div className="mt-3">
+          <WrappedUnchecked />
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <input
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            placeholder="or paste the address of a token you hold"
-            aria-label="Token mint address"
-            className="min-w-0 flex-1 rounded-md border border-line bg-page px-2 py-1.5 font-mono"
-          />
-          <button
-            type="button"
-            disabled={text.trim() === ""}
-            onClick={() => props.onUse(text)}
-            className="rounded-md border border-line px-3 py-1.5 hover:border-accent hover:text-accent disabled:opacity-40"
-          >
-            Use this token
-          </button>
-        </div>
-        {props.notice}
-        {!found.wrappedChecked && <WrappedUnchecked />}
-      </fieldset>
+      )}
     </Panel>
+  );
+}
+
+// The entry to a published scenario: what its featured position is, and one action that
+// deposits and splits down to it.
+function ScenarioBanner(props: {
+  // Each question of the featured position with the results it pays on.
+  legs: readonly Readonly<{ question: string; results: string }>[];
+  symbol: string;
+  decimals: number;
+  free: bigint;
+  held: bigint;
+  mintable: boolean;
+  busy: boolean;
+  onTake: (amount: bigint) => void;
+  onFail: (message: string) => void;
+}) {
+  const { decimals, free } = props;
+  const [text, setText] = useState(() => plainAmount(free, decimals));
+  // Follow the balance until the amount is edited, since it arrives after the first render.
+  const edited = useRef(false);
+  useEffect(() => {
+    if (!edited.current) setText(plainAmount(free, decimals));
+  }, [free, decimals]);
+  const pick = (next: string) => {
+    edited.current = true;
+    setText(next);
+  };
+
+  function submit() {
+    const amount = attempt(() => parseTokenAmount(text, decimals));
+    if (!amount.ok || amount.value <= 0n) return props.onFail("Enter an amount to deposit.");
+    if (amount.value > free) {
+      return props.onFail(
+        `You have ${formatTokenAmount(free, decimals)} ${props.symbol} to deposit.`,
+      );
+    }
+    props.onTake(amount.value);
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-accent/40 bg-page p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <span className="font-medium">This scenario's position pays if</span>
+        {props.legs.map((leg, index) => (
+          <span key={index} className="flex items-center gap-2">
+            {index > 0 && <span className="text-muted">and</span>}
+            <span className="rounded-md border border-line bg-panel px-2 py-0.5">
+              <span className="text-muted">{leg.question}: </span>
+              <span className="font-medium">{leg.results}</span>
+            </span>
+          </span>
+        ))}
+        {props.held > 0n && (
+          <span className="ml-auto text-good">
+            You hold {formatTokenAmount(props.held, decimals)} shares
+          </span>
+        )}
+      </div>
+      {free === 0n && props.held > 0n ? null : free === 0n ? (
+        <p className="mt-2 text-muted">
+          You have no {props.symbol} to deposit.{" "}
+          {props.mintable
+            ? "Mint some above."
+            : "Its issuer has to send you some, or another wallet can send you positions."}
+        </p>
+      ) : (
+        <>
+          <fieldset
+            disabled={props.busy}
+            className="m-0 mt-3 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0"
+          >
+            <span className="text-muted">Deposit</span>
+            <input
+              value={text}
+              onChange={(event) => pick(event.target.value)}
+              inputMode="decimal"
+              aria-label={`Amount of ${props.symbol} to deposit`}
+              className="w-32 rounded-md border border-line bg-panel px-2 py-1.5 font-mono"
+            />
+            <span className="text-muted">{props.symbol}</span>
+            <div className="w-44 [&>div]:mt-0">
+              <Fractions max={free} decimals={decimals} onPick={pick} />
+            </div>
+            <button
+              type="button"
+              onClick={submit}
+              className="rounded-md bg-accent px-3 py-1.5 font-medium text-panel disabled:opacity-40"
+            >
+              Get this position
+            </button>
+          </fieldset>
+          <p className="mt-2 text-xs text-muted">
+            You get one share of it for each {props.symbol} deposited, in{" "}
+            {props.legs.length === 1
+              ? "one transaction"
+              : `${props.legs.length} transactions, one per question`}
+            . The same number of shares on the other results comes with it and stays in your graph,
+            to send, wrap or merge back. To pick other results yourself, use the split button under
+            your wallet.
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 
 function Workspace(props: {
   owner: Address;
   chain: ChainState;
+  scenario: ScenarioEntry | undefined;
   questions: readonly StoredQuestion[];
   busy: string | null;
   notice: ReactNode;
@@ -486,7 +547,7 @@ function Workspace(props: {
     mode: "logical" | "product",
   ) => Promise<void>;
 }) {
-  const { owner, chain, selection } = props;
+  const { owner, chain, selection, scenario } = props;
   const { collateral } = chain;
   const { decimals } = collateral;
   // The token's own symbol when it has one; an unnamed token made here is still "TEST" to its
@@ -535,10 +596,15 @@ function Workspace(props: {
     const others = [...chain.conditions.values()]
       .map(unnamedCondition)
       .filter((condition) => !keys.has(condition.key));
+    // A scenario shows its own questions and those of held positions, whatever else this
+    // browser has named.
+    const featured = scenario && new Set(scenario.path.map((factor) => toHex(factor.conditionId)));
     return [...named, ...others].filter(
-      (condition) => inUse.has(condition.key) || !hidden.includes(condition.key),
+      (condition) =>
+        inUse.has(condition.key) ||
+        (featured ? featured.has(condition.key) : !hidden.includes(condition.key)),
     );
-  }, [props.questions, chain.conditions, hidden, inUse]);
+  }, [props.questions, chain.conditions, hidden, inUse, scenario]);
   const resolutions: Resolutions = useMemo(
     () =>
       Object.fromEntries(
@@ -584,6 +650,25 @@ function Workspace(props: {
     );
     return steps[steps.length - 1]!.output;
   };
+
+  // Offered when each question of the featured position appears once, so that it is reached
+  // by one split per question.
+  const featuredPath =
+    scenario &&
+    repetition(scenario.path) === "none" &&
+    scenario.path.every((factor) =>
+      conditions.some((condition) => condition.key === toHex(factor.conditionId)),
+    )
+      ? scenario.path
+      : null;
+  function takeFeatured(path: readonly ConditionClause[], amount: bigint) {
+    void props.onRun(
+      "Taking the position",
+      `Deposited ${tokens(amount)} and split it down to ${nameOf(path)}.`,
+      () => takePosition(client, collateral, path, amount),
+    );
+    props.onSelect({ kind: "position", key: holdingKey(path) });
+  }
 
   const actions: Actions = {
     split: (parent, condition, partition, amount) => {
@@ -635,6 +720,19 @@ function Workspace(props: {
         `Sent ${amountOf(amount)} shares of ${nameOf(node.factors)} to ${shorten(recipient.value)}.`,
         () => transfer(client, collateral, node.factors, recipient.value, amount),
       );
+    },
+    publish: (key, name) => {
+      const node = ledger.nodes.find((candidate) => candidate.key === key);
+      if (!node) return;
+      const valid = attempt(() => validateScenarioName(name));
+      if (!valid.ok) {
+        return props.onFail(
+          "A scenario name is 1 to 64 bytes, without line breaks or surrounding spaces.",
+        );
+      }
+      // A question used twice only means something as an explicit product.
+      const mode = repetition(node.factors) === "none" ? "logical" : "product";
+      void props.onPublishScenario(name, node.factors, mode);
     },
     unwrap: (key, amount) => {
       const node = ledger.nodes.find((candidate) => candidate.key === key);
@@ -840,19 +938,46 @@ function Workspace(props: {
               Refresh
             </button>
             <button type="button" onClick={props.onChangeToken} className="text-accent underline">
-              Use another token
+              {scenario ? "All scenarios" : "Use another token"}
             </button>
           </span>
         </div>
+
+        {scenario && featuredPath && (
+          <ScenarioBanner
+            legs={featuredPath.map((factor) => {
+              const condition = findCondition(conditions, factor.conditionId);
+              return {
+                question: condition.title,
+                results: outcomesInIndexSet(factor.indexSet, factor.outcomeCount)
+                  .map((outcome) => condition.outcomes[outcome]!)
+                  .join(" or "),
+              };
+            })}
+            symbol={symbol}
+            decimals={decimals}
+            free={collateral.registered ? collateral.free : 0n}
+            held={
+              chain.positions.find(
+                (position) => holdingKey(position.factors) === holdingKey(featuredPath),
+              )?.amount ?? 0n
+            }
+            mintable={collateral.mintable}
+            busy={props.busy !== null}
+            onTake={(amount) => takeFeatured(featuredPath, amount)}
+            onFail={props.onFail}
+          />
+        )}
 
         <Questions
           conditions={conditions}
           resolutions={resolutions}
           selectedKey={selectedCondition?.key ?? null}
           onSelect={(key) => props.onSelect({ kind: "condition", key })}
-          onAdd={addQuestion}
+          // A published scenario has its questions; others are prepared on the Live page.
+          {...(scenario ? {} : { onAdd: addQuestion })}
           examples={EXAMPLE_QUESTIONS}
-          removable={(key) => !inUse.has(key)}
+          removable={(key) => !scenario && !inUse.has(key)}
           onRemove={hide}
         />
 
@@ -954,201 +1079,6 @@ function Workspace(props: {
           )}
         </section>
       </div>
-      <ScenarioPublisher
-        conditions={conditions}
-        busy={props.busy !== null}
-        onPublish={props.onPublishScenario}
-      />
     </fieldset>
-  );
-}
-
-type ScenarioFactorDraft = Readonly<{
-  id: string;
-  conditionKey: string;
-  outcomes: readonly number[];
-}>;
-
-function ScenarioPublisher(props: {
-  conditions: readonly DemoCondition[];
-  busy: boolean;
-  onPublish: (
-    name: string,
-    factors: readonly ConditionClause[],
-    mode: "logical" | "product",
-  ) => Promise<void>;
-}) {
-  const first = props.conditions[0];
-  const [name, setName] = useState("");
-  const [mode, setMode] = useState<"logical" | "product">("logical");
-  const [factors, setFactors] = useState<readonly ScenarioFactorDraft[]>(() =>
-    first ? [{ id: crypto.randomUUID(), conditionKey: first.key, outcomes: [0] }] : [],
-  );
-  const [problem, setProblem] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (window.location.hash !== ROUTES.liveCreate) return;
-    document.getElementById("scenario-creator")?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-
-  useEffect(() => {
-    if (factors.length > 0 || !first) return;
-    setFactors([{ id: crypto.randomUUID(), conditionKey: first.key, outcomes: [0] }]);
-  }, [factors.length, first]);
-
-  function update(id: string, next: Partial<Omit<ScenarioFactorDraft, "id">>) {
-    setFactors((current) =>
-      current.map((factor) => (factor.id === id ? { ...factor, ...next } : factor)),
-    );
-  }
-
-  function submit() {
-    try {
-      validateScenarioName(name);
-      if (factors.length === 0) throw new RangeError("Add at least one question factor.");
-      const clauses = factors.map((factor) => {
-        const condition = props.conditions.find(
-          (candidate) => candidate.key === factor.conditionKey,
-        );
-        if (!condition) throw new RangeError("Choose a prepared question for every factor.");
-        if (factor.outcomes.length === 0 || factor.outcomes.length === condition.outcomes.length) {
-          throw new RangeError("Each featured subset must include some, but not all, outcomes.");
-        }
-        const words: [bigint, bigint, bigint, bigint] = [0n, 0n, 0n, 0n];
-        for (const outcome of factor.outcomes) {
-          words[Math.floor(outcome / 64)]! |= 1n << BigInt(outcome % 64);
-        }
-        return {
-          conditionId: condition.conditionId,
-          outcomeCount: condition.outcomes.length,
-          indexSet: words,
-        } satisfies ConditionClause;
-      });
-      setProblem(null);
-      void props.onPublish(name, clauses, mode);
-    } catch (error) {
-      setProblem(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  return (
-    <section
-      id="scenario-creator"
-      className="min-w-0 rounded-xl border border-line bg-panel p-4 xl:col-span-2"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="font-medium">Publish this scenario</h2>
-          <p className="mt-1 text-sm text-muted">
-            Name a condition basis without depositing. Its featured claim becomes the discovery
-            entrypoint.
-          </p>
-        </div>
-        <select
-          value={mode}
-          onChange={(event) => setMode(event.target.value as "logical" | "product")}
-          className="rounded-md border border-line bg-page px-2 py-1.5 text-sm"
-          aria-label="Composition mode"
-        >
-          <option value="logical">Logical conjunction</option>
-          <option value="product">Explicit product</option>
-        </select>
-      </div>
-      <fieldset disabled={props.busy} className="m-0 mt-4 flex min-w-0 flex-col gap-4 border-0 p-0">
-        <label className="text-sm">
-          <span className="font-medium">Name</span>
-          <input
-            value={name}
-            maxLength={64}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="SOL/USD at expiry"
-            className="mt-1 block w-full rounded-md border border-line bg-page px-2 py-1.5"
-          />
-          <span className="mt-1 block text-xs text-muted">
-            {new TextEncoder().encode(name).length}/64 UTF-8 bytes
-          </span>
-        </label>
-        {props.conditions.length === 0 ? (
-          <p className="text-sm text-muted">Prepare at least one question above first.</p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {factors.map((factor, factorIndex) => {
-              const condition =
-                props.conditions.find((candidate) => candidate.key === factor.conditionKey) ??
-                first!;
-              return (
-                <div key={factor.id} className="rounded-lg border border-line p-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium">Factor {factorIndex + 1}</span>
-                    <select
-                      value={factor.conditionKey}
-                      onChange={(event) =>
-                        update(factor.id, { conditionKey: event.target.value, outcomes: [0] })
-                      }
-                      className="min-w-0 flex-1 rounded-md border border-line bg-page px-2 py-1.5 text-sm"
-                    >
-                      {props.conditions.map((candidate) => (
-                        <option key={candidate.key} value={candidate.key}>
-                          {candidate.title}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      disabled={factors.length === 1}
-                      onClick={() =>
-                        setFactors((current) => current.filter((item) => item.id !== factor.id))
-                      }
-                      className="text-xs text-muted hover:text-bad disabled:opacity-30"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm">
-                    {condition.outcomes.map((outcome, index) => (
-                      <label key={outcome} className="flex items-center gap-1.5">
-                        <input
-                          type="checkbox"
-                          checked={factor.outcomes.includes(index)}
-                          onChange={(event) =>
-                            update(factor.id, {
-                              outcomes: event.target.checked
-                                ? [...factor.outcomes, index].sort((left, right) => left - right)
-                                : factor.outcomes.filter((value) => value !== index),
-                            })
-                          }
-                        />
-                        {outcome}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() =>
-                setFactors((current) => [
-                  ...current,
-                  { id: crypto.randomUUID(), conditionKey: first!.key, outcomes: [0] },
-                ])
-              }
-              className="self-start text-sm text-accent underline"
-            >
-              Add another factor
-            </button>
-          </div>
-        )}
-        {problem && <p className="rounded-md bg-bad-soft px-3 py-2 text-sm text-bad">{problem}</p>}
-        <button
-          type="button"
-          disabled={props.busy || props.conditions.length === 0 || name === ""}
-          onClick={submit}
-          className="self-start rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-panel disabled:opacity-40"
-        >
-          Publish scenario
-        </button>
-      </fieldset>
-    </section>
   );
 }

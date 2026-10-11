@@ -4,9 +4,10 @@ import type { Address } from "@solana/kit";
 import { useState, type ReactNode } from "react";
 
 import { Panel } from "./components.tsx";
-import { LiveWorkspace } from "./LiveWorkspace.tsx";
+import { CreateScenario } from "./live/CreateScenario.tsx";
+import { EXAMPLE_QUESTIONS, LiveWorkspace, STORAGE, TEST_TOKEN } from "./LiveWorkspace.tsx";
 import { LiveScenarioDiscovery, LiveScenarioDetail } from "./live/scenarios.tsx";
-import { ROUTES, scenarioAddressFromRoute } from "./routes.ts";
+import { ROUTES, scenarioAddressFromRoute, tokenFromRoute } from "./routes.ts";
 import { client, CLUSTER } from "./solana.ts";
 import { useProgramDeployed } from "./Wallet.tsx";
 
@@ -103,24 +104,62 @@ export function Live(props: { route: string }) {
   if (live && scenarioAddress !== null) {
     return (
       <div className="flex flex-col gap-4">
-        {status}
+        {/* {status} */}
         <LiveScenarioDetail
           addressText={scenarioAddress}
           owner={connected?.account.address as Address | undefined}
+          {...(connected
+            ? {
+                workspace: (entry) => (
+                  <LiveWorkspace
+                    key={`${connected.account.address}:${scenarioAddress}:${entry.name}`}
+                    owner={connected.account.address as Address}
+                    scenario={entry}
+                  />
+                ),
+              }
+            : {})}
         />
       </div>
     );
   }
 
+  const token = tokenFromRoute(props.route);
+  if (ready && connected && token !== null) {
+    return (
+      <div className="flex flex-col gap-4">
+        {/* {status} */}
+        <LiveWorkspace
+          key={`${connected.account.address}:${token}`}
+          owner={connected.account.address as Address}
+          token={token as Address}
+        />
+      </div>
+    );
+  }
+
+  // The list of scenarios, and below it the tokens to open. A graph has its own address.
   if (ready && connected) {
     return (
       <div className="flex flex-col gap-4">
-        {status}
+        {/* {status} */}
+        <LiveScenarioDiscovery owner={connected.account.address as Address} />
         <LiveWorkspace
           key={connected.account.address}
           owner={connected.account.address as Address}
         />
-        <LiveScenarioDiscovery owner={connected.account.address as Address} />
+        {props.route === ROUTES.liveCreate && (
+          <CreateScenario
+            owner={connected.account.address as Address}
+            questionsKey={`${STORAGE}:questions`}
+            mintKey={`${STORAGE}:${connected.account.address}:mint`}
+            testToken={TEST_TOKEN}
+            examples={EXAMPLE_QUESTIONS}
+            onClose={() => {
+              window.location.hash = ROUTES.live;
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -139,7 +178,7 @@ export function Live(props: { route: string }) {
           {CLUSTER.name} SOL.
         </p>
       </section>
-      {status}
+      {/* {status} */}
       <Panel
         title="What will happen here"
         hint={

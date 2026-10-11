@@ -624,7 +624,8 @@ export function Questions(props: {
   resolutions: Resolutions;
   selectedKey: string | null;
   onSelect: (key: string) => void;
-  onAdd: (title: string, outcomes: readonly string[]) => string | null;
+  // Left out where the list of questions is fixed.
+  onAdd?: (title: string, outcomes: readonly string[]) => string | null;
   // Ready-made questions offered in the form.
   examples?: readonly Readonly<{ title: string; outcomes: readonly string[] }>[];
   // Takes a question off the list, where that is possible.
@@ -637,6 +638,7 @@ export function Questions(props: {
   const [error, setError] = useState<string | null>(null);
 
   function submit() {
+    if (!props.onAdd) return;
     const failure = props.onAdd(
       title.trim(),
       outcomes
@@ -697,7 +699,7 @@ export function Questions(props: {
             </span>
           );
         })}
-        {!adding && (
+        {props.onAdd && !adding && (
           <button type="button" onClick={() => setAdding(true)} className="text-accent underline">
             + Prepare a question
           </button>

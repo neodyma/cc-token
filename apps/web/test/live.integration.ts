@@ -27,6 +27,7 @@ import {
   reportPayouts,
   renameScenario,
   split,
+  takePosition,
   transfer,
   unwrap,
   wrap,
@@ -326,4 +327,12 @@ test("the live page's transactions run the whole lifecycle", async () => {
 
   await mintTestCollateral(client, collateral, 5n * UNIT);
   assert.equal(await free(), 1_005n * UNIT);
+
+  // A scenario's featured position in one action: a deposit, then a split per further question.
+  const taken = await takePosition(client, collateral, [sun, onTime], 5n * UNIT);
+  assert.ok(taken.length >= 2);
+  assert.equal(await free(), 1_000n * UNIT);
+  assert.equal(await held([sun, onTime]), 5n * UNIT);
+  assert.equal(await held([sun, late]), 5n * UNIT);
+  assert.equal(await held([sun]), 0n);
 });

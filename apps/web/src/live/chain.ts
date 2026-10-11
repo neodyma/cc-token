@@ -1,4 +1,5 @@
 import {
+  complementIndexSet,
   deriveCollectionId,
   deriveConditionId,
   derivePositionId,
@@ -230,6 +231,24 @@ export async function getMetadataAddress(mint: Address): Promise<Address> {
 
 // Metaplex CreateMetadataAccountV3, signed by the mint authority. Written out by hand to avoid
 // a dependency for one instruction.
+// What the metadata program accepts, in UTF-8 bytes.
+export const TOKEN_NAME_BYTES = 32;
+export const TOKEN_SYMBOL_BYTES = 10;
+
+// Why a name and symbol cannot be used, or null when they can.
+export function tokenLabelProblem(
+  label: Readonly<{ name: string; symbol: string }>,
+): string | null {
+  const size = (value: string) => new TextEncoder().encode(value).length;
+  if (label.name.trim() === "" || size(label.name) > TOKEN_NAME_BYTES) {
+    return `A token name is 1 to ${TOKEN_NAME_BYTES} bytes.`;
+  }
+  if (label.symbol.trim() === "" || size(label.symbol) > TOKEN_SYMBOL_BYTES) {
+    return `A token symbol is 1 to ${TOKEN_SYMBOL_BYTES} bytes.`;
+  }
+  return null;
+}
+
 export async function getNameTokenInstruction(
   authority: TransactionSigner,
   mint: Address,
@@ -285,6 +304,8 @@ export async function createTestCollateral(
   client: LiveClient,
   amount: bigint,
   decimals: number,
+  // Shown by wallets and explorers, where the cluster has the metadata program.
+  label: Readonly<{ name: string; symbol: string }> = TEST_TOKEN_NAME,
 ): Promise<Readonly<{ mint: Address; signatures: readonly Signature[] }>> {
   const payer = client.payer;
   const mint = await generateKeyPairSigner();
@@ -304,7 +325,9 @@ export async function createTestCollateral(
     }),
     create,
     getMintToInstruction({ mint: mint.address, token: ata, mintAuthority: payer, amount }),
-    ...((await canNameTokens(client)) ? [await getNameTokenInstruction(payer, mint.address)] : []),
+    ...((await canNameTokens(client))
+      ? [await getNameTokenInstruction(payer, mint.address, label)]
+      : []),
     await getRegisterCollateralInstructionAsync({ payer, mint: mint.address }),
   ]);
   return { mint: mint.address, signatures };
@@ -486,6 +509,31 @@ export function split(
   amount: bigint,
 ): Promise<readonly Signature[]> {
   return transition("split", client, collateral, parent, condition, partition, amount);
+}
+
+// Deposits and splits once per question, down to the position `path` names. Each question
+// may appear once. A later split can fail after earlier ones have landed.
+export async function takePosition(
+  client: LiveClient,
+  collateral: CollateralRef,
+  path: readonly ConditionClause[],
+  amount: bigint,
+): Promise<readonly Signature[]> {
+  const signatures: Signature[] = [];
+  for (let depth = 0; depth < path.length; depth += 1) {
+    const { conditionId, outcomeCount, indexSet } = path[depth]!;
+    signatures.push(
+      ...(await split(
+        client,
+        collateral,
+        path.slice(0, depth),
+        { conditionId, outcomeCount },
+        [indexSet, complementIndexSet(outcomeCount, indexSet)],
+        amount,
+      )),
+    );
+  }
+  return signatures;
 }
 
 export function merge(

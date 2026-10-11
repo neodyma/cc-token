@@ -137,6 +137,7 @@
 - [x] User / "receiver" flow: positions and wrapped tokens sent to a wallet are found from its address, with their question wording (local validator)
 - [x] "Creator" workflow
 - [x] Split, merge, transfer, resolve, redeem, wrap and unwrap flows on the Live page (local validator)
+- [x] Scenario pages open as a graph; scenario creation dialog with token and questions (exercised by hand on devnet; no automated browser tests)
 - [ ] Live page exercised end to end from a browser wallet on devnet
 - [ ] Native/compressed balance breakdown
 - [x] Optional advanced multiplicative construction

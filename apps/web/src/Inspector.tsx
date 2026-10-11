@@ -58,6 +58,8 @@ export type Actions = Readonly<{
   unwrap?: (key: string, amount: bigint) => void;
   // Only on the live page: give native shares to another wallet.
   transfer?: (key: string, recipient: string, amount: bigint) => void;
+  // Only on the live page: list the position under a public name.
+  publish?: (key: string, name: string) => void;
   // Only the simulator can take a result back.
   resetResults?: () => void;
   fail: (message: string) => void;
@@ -177,7 +179,7 @@ export function PositionInspector(
   );
 }
 
-type ActionPanel = "split" | "merge" | "trade" | "redeem" | "wrap" | "send";
+type ActionPanel = "split" | "merge" | "trade" | "redeem" | "wrap" | "send" | "publish";
 
 // Outline icons on a 24 by 24 grid, one path per stroke.
 const ACTION_ICONS: Readonly<Record<ActionPanel, readonly string[]>> = {
@@ -197,6 +199,10 @@ const ACTION_ICONS: Readonly<Record<ActionPanel, readonly string[]>> = {
   send: [
     "M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z",
     "m21.854 2.147-10.94 10.939",
+  ],
+  // A flag.
+  publish: [
+    "M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528",
   ],
   // A box.
   wrap: [
@@ -340,7 +346,13 @@ export function NodeActions(props: Workspace & { node: PositionNode | null }) {
         {redeemable.length > 0 && tab("redeem", "Redeem", held === 0n)}
         {actions.wrap && tab("wrap", "Wrap / Unwrap", held === 0n && wrappedAmount === 0n)}
         {actions.transfer && tab("send", "Send", held === 0n)}
+        {actions.publish && tab("publish", "Publish as scenario")}
       </div>
+      {open === "publish" &&
+        panel(
+          "Give this position a public name. Every wallet then finds it in the list of scenarios and can open it as a graph. Nothing is deposited.",
+          <PublishEditor onPublish={(name) => actions.publish?.(node.key, name)} />,
+        )}
       {open === "send" &&
         panel(
           "Give shares of this position to another wallet. It needs nothing set up beforehand and will find them on its Live page.",
@@ -583,12 +595,16 @@ export function ConditionInspector(
 }
 
 // An amount as it is typed into a field: no thousands separators.
-function plainAmount(amount: bigint, decimals: number): string {
+export function plainAmount(amount: bigint, decimals: number): string {
   return formatTokenAmount(amount, decimals).replaceAll(",", "");
 }
 
 // Shortcuts under an amount field: a quarter, half, three quarters or all of what is available.
-function Fractions(props: { max: bigint; decimals: number; onPick: (text: string) => void }) {
+export function Fractions(props: {
+  max: bigint;
+  decimals: number;
+  onPick: (text: string) => void;
+}) {
   return (
     <div className="mt-1.5 flex gap-1.5">
       {[25n, 50n, 75n, 100n].map((percent) => (
@@ -602,6 +618,30 @@ function Fractions(props: { max: bigint; decimals: number; onPick: (text: string
           {percent === 100n ? "Max" : `${percent}%`}
         </button>
       ))}
+    </div>
+  );
+}
+
+function PublishEditor(props: { onPublish: (name: string) => void }) {
+  const [name, setName] = useState("");
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      <input
+        value={name}
+        maxLength={64}
+        onChange={(event) => setName(event.target.value)}
+        placeholder="Scenario name"
+        aria-label="Scenario name"
+        className="block w-full rounded-md border border-line bg-page px-2 py-1.5"
+      />
+      <button
+        type="button"
+        disabled={name.trim() === ""}
+        onClick={() => props.onPublish(name.trim())}
+        className="self-start rounded-md bg-accent px-3 py-1.5 font-medium text-panel disabled:opacity-40"
+      >
+        Publish
+      </button>
     </div>
   );
 }

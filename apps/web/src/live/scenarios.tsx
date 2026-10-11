@@ -6,10 +6,11 @@ import {
   type VerifiedScenario,
 } from "@cc-token/sdk";
 import { address, type Address, type ReadonlyUint8Array } from "@solana/kit";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Panel } from "../components.tsx";
 import { describeError } from "../errors.ts";
+import type { ScenarioEntry } from "../LiveWorkspace.tsx";
 import { liveScenarioRoute, ROUTES } from "../routes.ts";
 import { toHex } from "../scenario.ts";
 import { client } from "../solana.ts";
@@ -198,7 +199,15 @@ export function LiveScenarioDiscovery(props: { owner?: Address }) {
   );
 }
 
-export function LiveScenarioDetail(props: { addressText: string; owner?: Address }) {
+// With a wallet, `workspace` draws the scenario as a graph to act on. Without one, the
+// featured position is listed as text.
+export function LiveScenarioDetail(props: {
+  addressText: string;
+  owner?: Address;
+  workspace?: (entry: ScenarioEntry) => ReactNode;
+}) {
+  const graphed = props.workspace !== undefined;
+  const [renaming, setRenaming] = useState(false);
   const [detail, setDetail] = useState<Readonly<{
     scenario: VerifiedScenario;
     participation: ScenarioParticipation;
@@ -222,8 +231,9 @@ export function LiveScenarioDetail(props: { addressText: string; owner?: Address
             ]),
           ).values(),
         ];
+        // The graph reads the wording itself, so it is not asked for twice.
         const recovered = await Promise.all(
-          conditionAccounts.map(async (condition) => {
+          (graphed ? [] : conditionAccounts).map(async (condition) => {
             const chainCondition: ChainCondition = {
               conditionId: Uint8Array.from(condition.data.conditionId),
               questionId: Uint8Array.from(condition.data.questionId),
@@ -245,7 +255,8 @@ export function LiveScenarioDetail(props: { addressText: string; owner?: Address
           ),
         );
         let participation: ScenarioParticipation = "unrelated";
-        if (props.owner) {
+        // The graph reads the wallet's positions itself.
+        if (props.owner && !graphed) {
           const positions = await fetchPositions(
             client.rpc,
             props.owner,
@@ -285,7 +296,25 @@ export function LiveScenarioDetail(props: { addressText: string; owner?: Address
     return () => {
       current = false;
     };
-  }, [props.addressText, props.owner, reload]);
+  }, [props.addressText, props.owner, graphed, reload]);
+
+  const scenarioName = detail?.scenario.definition.data.name;
+  const anchor = detail?.scenario.anchor;
+  const entry = useMemo<ScenarioEntry | null>(
+    () =>
+      scenarioName === undefined || anchor === undefined
+        ? null
+        : {
+            name: scenarioName,
+            mint: anchor.position.data.collateralMint,
+            path: anchor.collection.factors.map(({ conditionId, outcomeCount, indexSet }) => ({
+              conditionId: Uint8Array.from(conditionId),
+              outcomeCount,
+              indexSet,
+            })),
+          },
+    [scenarioName, anchor],
+  );
 
   if (problem) {
     return (
@@ -302,74 +331,115 @@ export function LiveScenarioDetail(props: { addressText: string; owner?: Address
   const { scenario, participation, label, names } = detail;
   return (
     <div className="flex flex-col gap-4">
-      <Panel title={scenario.definition.data.name}>
-        <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <Datum label="State" value={scenario.state.replace("_", " ")} />
-          <Datum
-            label="Collateral"
-            value={
-              label?.symbol || label?.name || shorten(scenario.anchor.position.data.collateralMint)
-            }
-            title={scenario.anchor.position.data.collateralMint}
-          />
-          <Datum
-            label="Creator"
-            value={shorten(scenario.definition.data.creator)}
-            title={scenario.definition.data.creator}
-          />
-          <Datum
-            label="Your holdings"
-            value={
-              props.owner
-                ? participation === "exact"
-                  ? "Exact position"
-                  : participation === "compatible"
-                    ? "Compatible position"
-                    : "None"
-                : "Connect to check"
-            }
-          />
-        </div>
-        {props.owner === scenario.definition.data.creator && (
-          <RenameScenario
-            current={scenario.definition.data.name}
-            anchorPositionId={scenario.definition.data.anchorPositionId}
-            onRenamed={() => setReload((value) => value + 1)}
-          />
-        )}
-      </Panel>
-      <Panel
-        title="Featured claim path"
-        hint="The anchor names one complete path through the scenario. Other compatible claims are derived from the same condition basis when needed."
-      >
-        <ol className="flex flex-col gap-3">
-          {scenario.anchor.collection.factors.map((factor, index) => {
-            const question = names.get(toHex(factor.conditionId));
-            const selected = selectedOutcomes(factor.indexSet, factor.outcomeCount).map(
-              (outcome) => question?.outcomes[outcome] ?? `Outcome ${outcome + 1}`,
-            );
-            return (
-              <li
-                key={`${toHex(factor.conditionId)}:${index}`}
-                className="rounded-lg border border-line p-3"
+      {graphed ? (
+        // The graph below shows the collateral and the holdings, so one line is enough here.
+        <div className="rounded-lg border border-line bg-panel px-4 py-2 text-sm">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <h1 className="text-base font-semibold">{scenario.definition.data.name}</h1>
+            <span className="text-muted capitalize">{scenario.state.replace("_", " ")}</span>
+            <span className="text-muted" title={scenario.definition.data.creator}>
+              by{" "}
+              <span className="font-mono text-xs">{shorten(scenario.definition.data.creator)}</span>
+            </span>
+            {props.owner === scenario.definition.data.creator && (
+              <button
+                type="button"
+                onClick={() => setRenaming((value) => !value)}
+                className="ml-auto text-accent underline"
               >
-                <p className="font-medium">
-                  {question?.title ?? `Question ${shorten(toHex(factor.conditionId))}`}
-                </p>
-                <p className="mt-1 text-sm text-muted">{selected.join(" or ")}</p>
-              </li>
-            );
-          })}
-        </ol>
-        <div className="mt-4 flex flex-wrap gap-4 text-sm">
-          <a href={ROUTES.live} className="text-accent underline">
-            Back to scenarios
-          </a>
-          {!props.owner && (
-            <span className="text-muted">Connect a wallet to use this scenario.</span>
+                {renaming ? "Cancel" : "Rename"}
+              </button>
+            )}
+          </div>
+          {renaming && (
+            <RenameScenario
+              current={scenario.definition.data.name}
+              anchorPositionId={scenario.definition.data.anchorPositionId}
+              onRenamed={() => {
+                setRenaming(false);
+                setReload((value) => value + 1);
+              }}
+            />
           )}
         </div>
-      </Panel>
+      ) : (
+        <Panel title={scenario.definition.data.name}>
+          <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <Datum label="State" value={scenario.state.replace("_", " ")} />
+            <Datum
+              label="Collateral"
+              value={
+                label?.symbol ||
+                label?.name ||
+                shorten(scenario.anchor.position.data.collateralMint)
+              }
+              title={scenario.anchor.position.data.collateralMint}
+            />
+            <Datum
+              label="Creator"
+              value={shorten(scenario.definition.data.creator)}
+              title={scenario.definition.data.creator}
+            />
+            <Datum
+              label="Your holdings"
+              value={
+                props.owner
+                  ? participation === "exact"
+                    ? "Exact position"
+                    : participation === "compatible"
+                      ? "Compatible position"
+                      : "None"
+                  : "Connect to check"
+              }
+            />
+          </div>
+          {props.owner === scenario.definition.data.creator && (
+            <RenameScenario
+              current={scenario.definition.data.name}
+              anchorPositionId={scenario.definition.data.anchorPositionId}
+              onRenamed={() => setReload((value) => value + 1)}
+            />
+          )}
+        </Panel>
+      )}
+      {props.workspace && entry ? (
+        props.workspace(entry)
+      ) : (
+        <Panel
+          title="Featured claim path"
+          hint="The anchor names one complete path through the scenario. Other compatible claims are derived from the same condition basis when needed."
+        >
+          <ol className="flex flex-col gap-3">
+            {scenario.anchor.collection.factors.map((factor, index) => {
+              const question = names.get(toHex(factor.conditionId));
+              const selected = selectedOutcomes(factor.indexSet, factor.outcomeCount).map(
+                (outcome) => question?.outcomes[outcome] ?? `Outcome ${outcome + 1}`,
+              );
+              return (
+                <li
+                  key={`${toHex(factor.conditionId)}:${index}`}
+                  className="rounded-lg border border-line p-3"
+                >
+                  <p className="font-medium">
+                    {question?.title ?? `Question ${shorten(toHex(factor.conditionId))}`}
+                  </p>
+                  <p className="mt-1 text-sm text-muted">{selected.join(" or ")}</p>
+                </li>
+              );
+            })}
+          </ol>
+          <div className="mt-4 flex flex-wrap gap-4 text-sm">
+            <a href={ROUTES.live} className="text-accent underline">
+              Back to scenarios
+            </a>
+            {!props.owner && (
+              <span className="text-muted">
+                Connect a wallet to open this scenario as a graph and take the position.
+              </span>
+            )}
+          </div>
+        </Panel>
+      )}
     </div>
   );
 }
