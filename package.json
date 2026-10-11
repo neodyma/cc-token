@@ -20,7 +20,8 @@
     "test:web": "pnpm --filter @cc-token/web test",
     "test:litesvm": "node scripts/test-litesvm.mjs",
     "test:integration": "node scripts/test-integration.mjs",
-    "check": "node --check scripts/deploy-devnet.mjs && cargo check --workspace --all-targets --locked && pnpm generate:client && pnpm --filter @cc-token/sdk typecheck && pnpm --filter @cc-token/web typecheck",
+    "test:devnet": "node scripts/test-devnet.mjs",
+    "check": "node --check scripts/deploy-devnet.mjs && node --check scripts/test-devnet.mjs && cargo check --workspace --all-targets --locked && pnpm generate:client && pnpm --filter @cc-token/sdk typecheck && pnpm --filter @cc-token/web typecheck",
     "format": "cargo fmt --all && prettier --write . --ignore-path .gitignore --ignore-path .prettierignore",
     "format:check": "cargo fmt --all --check && prettier --check . --ignore-path .gitignore --ignore-path .prettierignore"
   },
