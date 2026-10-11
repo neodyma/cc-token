@@ -1,19 +1,143 @@
 # cc-token
 
-Combinatorial conditional tokens for Solana.
+cc-token is a Solana program for collateral-backed combinatorial claims. A holder can split one
+deposit across an outcome partition, refine a claim with more conditions, transfer or wrap the
+resulting positions, and redeem them after resolution.
 
-## Layout
+[Live devnet application](https://cc-token.vercel.app/#/live) ·
+[Devnet program](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet) ·
+[Worked examples](EXAMPLES.md)
 
-```text
-Anchor.toml                  Anchor workspace and localnet configuration
-Cargo.toml                   Rust workspace
-programs/cc_token/src/lib.rs Program entrypoints
-pnpm-workspace.yaml          JavaScript workspace (apps/* and packages/*)
+## Protocol model
+
+- A **condition** defines 2–256 outcomes, a resolver and an eventual payout vector.
+- A **collection** composes outcome subsets through BN254 point addition. Composition order does
+  not change its ID; repeated factors remain distinct.
+- A **position** binds a collection to one collateral mint.
+- A **balance** records one owner's native shares of a position.
+- A **scenario** gives one canonical anchor position a discoverable name. It does not own funds or
+  restrict a position to one scenario.
+- A **wrapper** exchanges native shares one-for-one with a canonical Token-2022 mint.
+
+A root split transfers collateral into the program vault and creates equal quantities of every
+position in a complete partition. Intermediate splits consume a position and create its refined
+children without moving collateral. Complete sets merge through the inverse transitions.
+
+## Architecture
+
+![cc-token architecture](docs/assets/cc-token-architecture.svg)
+
+The program stores reusable definitions separately from holder balances. Every collection and
+position registration recomputes its canonical identity. The SDK reconstructs a scenario by
+verifying its anchor position and walking the registered collection parents, then intersects that
+basis with native balances and canonical wrappers held by the wallet.
+
+[Protocol architecture](docs/architecture.md) documents the actors, PDA seeds, account fields,
+instruction groups, external programs, validation boundaries and client discovery flow. The
+editable diagram source is
+[docs/assets/cc-token-architecture.excalidraw](docs/assets/cc-token-architecture.excalidraw).
+
+## Authority and value invariants
+
+| Actor            | Authority                                                                                |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| Holder           | Signs every operation that consumes its collateral or position shares.                   |
+| Resolver         | Reports the irreversible payout vector for one condition.                                |
+| Scenario creator | Publishes and renames a discovery descriptor. It has no authority over position holders. |
+| Payer            | Funds reusable accounts and gains no authority from doing so.                            |
+| Recipient        | Can receive native or wrapped shares without approving the incoming transfer.            |
+
+The program has no global administrator. The collateral vault is controlled only by its PDA.
+Root operations require a complete partition, split and merge preserve share quantities, and
+wrapper supply is backed one-for-one by escrowed native shares. Collateral with a freeze authority
+is recorded as issuer-controlled and requires explicit acceptance before deposit.
+
+## Web application
+
+`apps/web/` contains three pages:
+
+- **How it works** explains the claim model.
+- **Simulator** runs an in-browser position graph and simulated market without transactions.
+- **Live** discovers named scenarios from program accounts and uses the deployed devnet program.
+  It supports scenario creation, deposit, split, merge, native transfer, wrap, unwrap, resolution
+  and redemption. Scenario graphs are readable without a wallet.
+
+Run it locally:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm dev:web
 ```
 
-`apps/web/` contains the frontend, `packages/sdk/` contains the shared clients. The frontend consumes the SDK through a workspace dependency. SDK owns ID derivation, instruction building, and generated client exports.
+Open <http://localhost:5173>. The build produces the IDL used to regenerate the tracked Kit client.
+[docs/devnet.md](docs/devnet.md) describes the live flows and optional server-side RPC proxy.
 
-## Toolchain
+## Tests
+
+The deterministic suite builds the SBPF v3 program and runs every local test layer:
+
+```sh
+pnpm test
+```
+
+| Command                 | Coverage                                                                                  |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `pnpm test:rust`        | Identity, partition, arithmetic and state primitives.                                     |
+| `pnpm test:sdk`         | Client derivation, verification, transaction planning and execution recovery.             |
+| `pnpm test:web`         | Graph, discovery, scenario, market, RPC proxy and display behavior.                       |
+| `pnpm test:litesvm`     | Compiled-program instruction behavior, failures, rollback and account lifecycle.          |
+| `pnpm test:integration` | Generated Kit clients and Live flows against an isolated local Agave validator.           |
+| `pnpm test:devnet`      | Explicit opt-in smoke test against the deployed program with a disposable funded keypair. |
+
+The devnet command performs a read-only preflight unless `--execute` is supplied:
+
+```sh
+pnpm test:devnet -- --payer .local/devnet-test-payer.json
+pnpm test:devnet -- --payer .local/devnet-test-payer.json --execute
+```
+
+It verifies the cluster and program, publishes one submission scenario, and exercises collateral,
+nested positions, transfer, wrappers, resolution and redemption. See
+[docs/devnet.md](docs/devnet.md#deployed-program-submission-test) for RPC configuration and state
+left by the test.
+
+## Devnet deployment
+
+| Field   | Value                                                                                                                                             |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Program | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet) |
+| Source  | [`bad5637`](https://github.com/neodyma/cc-token/commit/bad563728501223feb4be00739c96a90040278d5)                                                  |
+| IDL     | Published on devnet; generated Kit clients are tracked under `packages/sdk/src/generated/`.                                                       |
+| Record  | [`deployments/devnet.json`](deployments/devnet.json)                                                                                              |
+
+[docs/deployment.md](docs/deployment.md) covers the pinned build, status checks, deployment dry
+run, upgrade flow and recorded artifact hash.
+
+```sh
+pnpm deploy:devnet -- --offline
+pnpm devnet:status
+```
+
+Neither command changes the global Solana CLI configuration. The repository does not create,
+fund or store deployment authorities.
+
+## Current scope
+
+- Resolution depends on the resolver named when the condition is prepared.
+- Splits, merges and redemptions operate on native balances. Wrappers provide Token-2022
+  interoperability.
+- The web application uses transaction v0 as its wallet compatibility baseline. Transaction v1
+  remains an optional SDK path for larger operations.
+- Large payout vectors use staged report accounts; the current web form submits direct reports of
+  at most 96 outcomes.
+- Scenario discovery scans fixed-size descriptors directly. Catalogue pages and reverse indexes
+  are deferred until measured RPC scale requires them.
+- Compression, yield adapters and an on-chain market maker are outside the deployed MVP.
+- Browser-wallet flows have manual devnet coverage; automated runtime coverage uses LiteSVM and a
+  local validator.
+
+## Development
 
 | Tool                         | Version |
 | ---------------------------- | ------- |
@@ -34,41 +158,11 @@ pnpm test
 pnpm format:check
 ```
 
-## Web demo
-
-`apps/web/` is a browser demo with three pages:
-
-- **How it works** explains the protocol in plain terms.
-- **Simulator** is one interactive graph of positions: prepare questions, deposit, split, merge, trade against a simulated market maker, report results and redeem. It uses the SDK for identifiers and payouts and sends no transactions.
-- **Live** runs the same graph against the program deployed on devnet. It lists named scenarios directly from program accounts and opens their featured paths as read-only graphs without requiring a wallet. With a connected wallet, the graph adds compatible holdings and one action to take the featured position. A dialog creates a scenario from a new test token, a known token or a pasted mint. From a graph the wallet can deposit, split, merge, send positions, wrap and unwrap Token-2022 representations, report results and redeem. See [docs/devnet.md](docs/devnet.md).
-
-```sh
-pnpm install --frozen-lockfile
-pnpm build
-pnpm dev:web
+```text
+programs/cc_token/   Anchor program
+packages/sdk/        Shared Kit client, generated bindings and transaction planning
+apps/web/            Vite/React simulator and devnet application
+tests/litesvm/       Compiled-program LiteSVM tests
+scripts/             Build, deployment and integration-test runners
+docs/                Architecture, API, runtime and deployment references
 ```
-
-Then open <http://localhost:5173>. `pnpm build` is needed once so the program IDL exists; `pnpm dev:web` regenerates the SDK client from it and starts the Vite dev server.
-
-The Live page's transactions are tested against a local validator by `pnpm test:integration`, with
-a keypair in place of the wallet. There are no automated browser tests.
-
-## Devnet
-
-The deployment workflow is documented in [docs/deployment.md](docs/deployment.md). It uses the
-pinned toolchain, verifies the devnet genesis hash and built program identity, and performs a dry
-run unless `--execute` is supplied.
-
-| Cluster | Program                                                                                                                                           | Source                                                                                           |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Devnet  | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet) | [`bad5637`](https://github.com/neodyma/cc-token/commit/bad563728501223feb4be00739c96a90040278d5) |
-
-The complete public deployment record is in [deployments/devnet.json](deployments/devnet.json).
-
-```sh
-pnpm deploy:devnet -- --offline
-pnpm devnet:status
-```
-
-Neither command changes the global Solana CLI configuration. The repository does not create,
-fund or store deployment authorities.
