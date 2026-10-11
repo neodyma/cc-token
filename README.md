@@ -102,6 +102,8 @@ nested positions, transfer, wrappers, resolution and redemption. See
 [docs/devnet.md](docs/devnet.md#deployed-program-submission-test) for RPC configuration and state
 left by the test.
 
+![Passing devnet submission test](tests-passing.png)
+
 ## Devnet deployment
 
 | Field   | Value                                                                                                                                             |
