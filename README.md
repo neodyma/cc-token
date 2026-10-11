@@ -33,9 +33,7 @@ verifying its anchor position and walking the registered collection parents, the
 basis with native balances and canonical wrappers held by the wallet.
 
 [Protocol architecture](docs/architecture.md) documents the actors, PDA seeds, account fields,
-instruction groups, external programs, validation boundaries and client discovery flow. The
-editable diagram source is
-[docs/assets/cc-token-architecture.excalidraw](docs/assets/cc-token-architecture.excalidraw).
+instruction groups, external programs, validation boundaries and client discovery flow.
 
 ## Authority and value invariants
 
@@ -93,8 +91,8 @@ pnpm test
 The devnet command performs a read-only preflight unless `--execute` is supplied:
 
 ```sh
-pnpm test:devnet -- --payer .local/devnet-test-payer.json
-pnpm test:devnet -- --payer .local/devnet-test-payer.json --execute
+pnpm test:devnet -- --payer devnet-test-payer.json
+pnpm test:devnet -- --payer devnet-test-payer.json --execute
 ```
 
 It verifies the cluster and program, publishes one submission scenario, and exercises collateral,
