@@ -624,9 +624,13 @@ export function Questions(props: {
   resolutions: Resolutions;
   selectedKey: string | null;
   onSelect: (key: string) => void;
-  onAdd: (title: string, outcomes: readonly string[]) => string | null;
+  // Left out where the list of questions is fixed.
+  onAdd?: (title: string, outcomes: readonly string[]) => string | null;
   // Ready-made questions offered in the form.
   examples?: readonly Readonly<{ title: string; outcomes: readonly string[] }>[];
+  // Questions that exist but are not on the list, and how to put one on it.
+  more?: readonly Readonly<{ key: string; title: string; outcomes: number }>[];
+  onShow?: (key: string) => void;
   // Takes a question off the list, where that is possible.
   removable?: (key: string) => boolean;
   onRemove?: (key: string) => void;
@@ -637,6 +641,7 @@ export function Questions(props: {
   const [error, setError] = useState<string | null>(null);
 
   function submit() {
+    if (!props.onAdd) return;
     const failure = props.onAdd(
       title.trim(),
       outcomes
@@ -697,10 +702,25 @@ export function Questions(props: {
             </span>
           );
         })}
-        {!adding && (
+        {props.onAdd && !adding && (
           <button type="button" onClick={() => setAdding(true)} className="text-accent underline">
             + Prepare a question
           </button>
+        )}
+        {props.onShow && props.more && props.more.length > 0 && (
+          <select
+            value=""
+            onChange={(event) => event.target.value && props.onShow?.(event.target.value)}
+            aria-label="Add a question you have already prepared"
+            className="rounded-md border border-line bg-page px-2 py-1 text-muted"
+          >
+            <option value="">+ Use an existing question…</option>
+            {props.more.map((question) => (
+              <option key={question.key} value={question.key}>
+                {question.title} ({question.outcomes} results)
+              </option>
+            ))}
+          </select>
         )}
       </div>
 

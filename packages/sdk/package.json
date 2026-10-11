@@ -8,6 +8,7 @@
     "./generated": "./src/generated/index.ts"
   },
   "scripts": {
+    "register:scenario": "node --experimental-strip-types scripts/register-devnet-scenario.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts"
   },

@@ -1,17 +1,23 @@
 import { fetchMint, type Mint } from "@solana-program/token";
 import {
+  getBase58Decoder,
+  getBase64Encoder,
   getAddressDecoder,
   isNone,
   isSome,
   type Account,
   type Address,
   type FetchAccountConfig,
+  type GetProgramAccountsApi,
   type ReadonlyUint8Array,
+  type Rpc,
+  type Base58EncodedBytes,
 } from "@solana/kit";
 
 import {
   CC_TOKEN_PROGRAM_ADDRESS,
   fetchMaybeWrapperConfig,
+  getWrapperConfigDecoder,
   getWrapperConfigDiscriminatorBytes,
   type PositionDefinition,
   type WrapperConfig,
@@ -22,14 +28,56 @@ import { fetchVerifiedPositionDefinition } from "./positions.ts";
 import { DefinitionVerificationError } from "./verify.ts";
 
 const STATE_VERSION = 1;
+const WRAPPER_CONFIG_SPACE = 76n;
 
 type WrapperRpc = Parameters<typeof fetchMaybeWrapperConfig>[0] & Parameters<typeof fetchMint>[0];
+
+type WrapperDiscoveryRpc = WrapperRpc & Rpc<GetProgramAccountsApi>;
 
 export type VerifiedWrapper = Readonly<{
   config: Account<WrapperConfig>;
   mint: Account<Mint>;
   position: Account<PositionDefinition>;
 }>;
+
+export async function fetchCanonicalWrapperConfigs(
+  rpc: WrapperDiscoveryRpc,
+  config?: FetchAccountConfig,
+): Promise<readonly Account<WrapperConfig>[]> {
+  const discriminator = getBase58Decoder().decode(
+    getWrapperConfigDiscriminatorBytes(),
+  ) as Base58EncodedBytes;
+  const found = await rpc
+    .getProgramAccounts(CC_TOKEN_PROGRAM_ADDRESS, {
+      encoding: "base64",
+      commitment: config?.commitment ?? "confirmed",
+      filters: [
+        { dataSize: WRAPPER_CONFIG_SPACE },
+        { memcmp: { offset: 0n, bytes: discriminator, encoding: "base58" } },
+      ],
+    })
+    .send();
+  const decoder = getWrapperConfigDecoder();
+  const configs: Account<WrapperConfig>[] = [];
+  for (const { pubkey, account } of found) {
+    try {
+      const bytes = getBase64Encoder().encode(account.data[0]);
+      const configAccount = {
+        address: pubkey,
+        data: decoder.decode(bytes),
+        executable: account.executable,
+        lamports: account.lamports,
+        programAddress: account.owner,
+        space: BigInt(bytes.length),
+      } satisfies Account<WrapperConfig>;
+      await verifyWrapperConfigIdentity(configAccount);
+      configs.push(configAccount);
+    } catch {
+      // Malformed program accounts must not block discovery of valid wrappers.
+    }
+  }
+  return configs;
+}
 
 export async function fetchVerifiedWrapper(
   rpc: WrapperRpc,
@@ -81,25 +129,11 @@ export async function verifyWrapperAccount(
   position: Account<PositionDefinition>,
 ): Promise<VerifiedWrapper> {
   requireBytes(
-    config.data.discriminator,
-    getWrapperConfigDiscriminatorBytes(),
-    "wrapper config discriminator does not match",
-  );
-  if (
-    config.programAddress !== CC_TOKEN_PROGRAM_ADDRESS ||
-    config.executable ||
-    config.data.version !== STATE_VERSION
-  ) {
-    throw new DefinitionVerificationError(
-      "invalid_owner",
-      "wrapper config is not owned by the cc-token program",
-    );
-  }
-  requireBytes(
     config.data.positionId,
     position.data.positionId,
     "wrapper references a different position",
   );
+  await verifyWrapperConfigIdentity(config);
 
   const [[wrapperAddress, wrapperBump], [mintAddress, mintBump]] = await Promise.all([
     getWrapperAddress(position.data.positionId),
@@ -129,6 +163,39 @@ export async function verifyWrapperAccount(
     );
   }
   return { config, mint, position };
+}
+
+async function verifyWrapperConfigIdentity(
+  config: Account<WrapperConfig>,
+): Promise<Account<WrapperConfig>> {
+  requireBytes(
+    config.data.discriminator,
+    getWrapperConfigDiscriminatorBytes(),
+    "wrapper config discriminator does not match",
+  );
+  if (
+    config.programAddress !== CC_TOKEN_PROGRAM_ADDRESS ||
+    config.executable ||
+    config.data.version !== STATE_VERSION
+  ) {
+    throw new DefinitionVerificationError(
+      "invalid_owner",
+      "wrapper config is not owned by the cc-token program",
+    );
+  }
+  const [[wrapperAddress, wrapperBump], [mintAddress, mintBump]] = await Promise.all([
+    getWrapperAddress(config.data.positionId),
+    getWrapperMintAddress(config.data.positionId),
+  ]);
+  if (
+    config.address !== wrapperAddress ||
+    config.data.bump !== wrapperBump ||
+    config.data.mint !== mintAddress ||
+    config.data.mintBump !== mintBump
+  ) {
+    throw new DefinitionVerificationError("invalid_pda", "wrapper config or mint is not canonical");
+  }
+  return config;
 }
 
 function requireBytes(

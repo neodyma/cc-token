@@ -1,7 +1,10 @@
 import {
+  complementIndexSet,
+  createKitExecutionAdapter,
   deriveCollectionId,
   deriveConditionId,
   derivePositionId,
+  executeConfirmedPlan,
   generatedClient,
   getCollectionAddress,
   getConditionAddress,
@@ -12,11 +15,14 @@ import {
   getMergeRootCollateralInstruction,
   getNativePositionSetupInstructions,
   getPrepareConditionInstruction,
+  getPositionBalanceAddress,
   getRedeemNativePositionInstruction,
   getRedeemNativePositionSetupInstructions,
   getRedeemRootCollateralInstruction,
   getRegisterCollateralInstructionAsync,
   getRegisterCollectionInstruction,
+  getScenarioAddress,
+  getUpdateScenarioDefinitionNameInstruction,
   getReportPayoutsInstruction,
   getRootCollateralSetupInstructions,
   getSplitNativePositionInstruction,
@@ -25,10 +31,16 @@ import {
   getUnwrapWrappedPositionInstruction,
   getWrapNativePositionInstruction,
   planPayoutReport,
+  planScenarioAnchor,
   ROOT_COLLECTION_ID,
   validatePartition,
+  WebStoragePlanCheckpointStore,
+  type CcTokenExecutionRpc,
   type ConditionClause,
   type IndexSetWords,
+  type PreparedCcTokenTransaction,
+  type TransactionInstructionPlanStep,
+  type WebStorage,
 } from "@cc-token/sdk";
 import {
   findAssociatedTokenPda,
@@ -55,6 +67,7 @@ import {
   type GetTokenAccountsByOwnerApi,
   type Instruction,
   type InstructionPlan,
+  type ReadonlyUint8Array,
   type Rpc,
   type Signature,
   type TransactionPlanResult,
@@ -65,13 +78,14 @@ import type { ConditionRef } from "../scenario.ts";
 
 // The parts of the Kit client the live page uses. `payer` is the connected wallet.
 export type LiveClient = Readonly<{
-  rpc: Rpc<
-    GetAccountInfoApi &
-      GetMultipleAccountsApi &
-      GetProgramAccountsApi &
-      GetSignaturesForAddressApi &
-      GetTokenAccountsByOwnerApi
-  >;
+  rpc: CcTokenExecutionRpc &
+    Rpc<
+      GetAccountInfoApi &
+        GetMultipleAccountsApi &
+        GetProgramAccountsApi &
+        GetSignaturesForAddressApi &
+        GetTokenAccountsByOwnerApi
+    >;
   payer: TransactionSigner;
   getMinimumBalance: ClientWithGetMinimumBalance["getMinimumBalance"];
   sendTransactions: (input: InstructionPlan) => Promise<TransactionPlanResult>;
@@ -105,6 +119,20 @@ async function send(
   );
 }
 
+// A node reads at most 100 accounts per request, so a longer list is read in several.
+const ACCOUNTS_PER_REQUEST = 100;
+
+export async function inBatches<TAddress, TAccount>(
+  addresses: readonly TAddress[],
+  read: (batch: TAddress[]) => Promise<readonly TAccount[]>,
+): Promise<TAccount[]> {
+  const batches: TAddress[][] = [];
+  for (let start = 0; start < addresses.length; start += ACCOUNTS_PER_REQUEST) {
+    batches.push(addresses.slice(start, start + ACCOUNTS_PER_REQUEST));
+  }
+  return (await Promise.all(batches.map(read))).flat();
+}
+
 // Setup is idempotent on-chain, but skipping what already exists saves approvals and fees.
 async function withoutExisting(
   client: LiveClient,
@@ -117,7 +145,7 @@ async function withoutExisting(
     return index === undefined ? null : (instruction.accounts?.[index]?.address ?? null);
   });
   const addresses = [...new Set(targets.filter((target) => target !== null))];
-  const accounts = await fetchEncodedAccounts(client.rpc, addresses);
+  const accounts = await inBatches(addresses, (batch) => fetchEncodedAccounts(client.rpc, batch));
   const settled = new Set<Address>(
     accounts.filter((account) => account.exists).map((account) => account.address),
   );
@@ -212,6 +240,24 @@ export async function getMetadataAddress(mint: Address): Promise<Address> {
 
 // Metaplex CreateMetadataAccountV3, signed by the mint authority. Written out by hand to avoid
 // a dependency for one instruction.
+// What the metadata program accepts, in UTF-8 bytes.
+export const TOKEN_NAME_BYTES = 32;
+export const TOKEN_SYMBOL_BYTES = 10;
+
+// Why a name and symbol cannot be used, or null when they can.
+export function tokenLabelProblem(
+  label: Readonly<{ name: string; symbol: string }>,
+): string | null {
+  const size = (value: string) => new TextEncoder().encode(value).length;
+  if (label.name.trim() === "" || size(label.name) > TOKEN_NAME_BYTES) {
+    return `A token name is 1 to ${TOKEN_NAME_BYTES} bytes.`;
+  }
+  if (label.symbol.trim() === "" || size(label.symbol) > TOKEN_SYMBOL_BYTES) {
+    return `A token symbol is 1 to ${TOKEN_SYMBOL_BYTES} bytes.`;
+  }
+  return null;
+}
+
 export async function getNameTokenInstruction(
   authority: TransactionSigner,
   mint: Address,
@@ -267,6 +313,8 @@ export async function createTestCollateral(
   client: LiveClient,
   amount: bigint,
   decimals: number,
+  // Shown by wallets and explorers, where the cluster has the metadata program.
+  label: Readonly<{ name: string; symbol: string }> = TEST_TOKEN_NAME,
 ): Promise<Readonly<{ mint: Address; signatures: readonly Signature[] }>> {
   const payer = client.payer;
   const mint = await generateKeyPairSigner();
@@ -286,7 +334,9 @@ export async function createTestCollateral(
     }),
     create,
     getMintToInstruction({ mint: mint.address, token: ata, mintAuthority: payer, amount }),
-    ...((await canNameTokens(client)) ? [await getNameTokenInstruction(payer, mint.address)] : []),
+    ...((await canNameTokens(client))
+      ? [await getNameTokenInstruction(payer, mint.address, label)]
+      : []),
     await getRegisterCollateralInstructionAsync({ payer, mint: mint.address }),
   ]);
   return { mint: mint.address, signatures };
@@ -321,6 +371,55 @@ export async function registerCollateral(
   ]);
 }
 
+export async function publishScenario(
+  client: LiveClient,
+  collateralMint: Address,
+  name: string,
+  factors: readonly ConditionClause[],
+  mode: "logical" | "product",
+): Promise<Readonly<{ address: Address; signatures: readonly Signature[] }>> {
+  const plan = await planScenarioAnchor({
+    payer: client.payer,
+    creator: client.payer,
+    collateralMint,
+    factors,
+    mode,
+    name,
+  });
+  const setup = await withoutExisting(client, plan.setupInstructions);
+  const signatures = await send(client, [...setup, plan.registerScenarioInstruction]);
+  const [address] = await getScenarioAddress(client.payer.address, plan.anchorPositionId);
+  return { address, signatures };
+}
+
+// The scenario this creator published for a position, if any. There is one per creator and
+// position, so publishing it again would change nothing.
+export async function findOwnScenario(
+  rpc: LiveClient["rpc"],
+  creator: Address,
+  collateralMint: Address,
+  factors: readonly ConditionClause[],
+): Promise<Readonly<{ address: Address; name: string }> | null> {
+  const positionId = derivePositionId(collateralMint, collectionIdOf(factors));
+  const [scenario] = await getScenarioAddress(creator, positionId);
+  const account = await generatedClient.fetchMaybeScenarioDefinition(rpc, scenario);
+  return account.exists ? { address: scenario, name: account.data.name } : null;
+}
+
+export async function renameScenario(
+  client: LiveClient,
+  anchorPositionId: ReadonlyUint8Array,
+  name: string,
+): Promise<readonly Signature[]> {
+  return send(client, [
+    await getUpdateScenarioDefinitionNameInstruction({
+      creator: client.payer,
+      anchorPositionId,
+      name,
+    }),
+  ]);
+}
+
 const MEMO_PROGRAM_ADDRESS = address("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
 // The connected wallet becomes the resolver, so only it can report the result later. `memo`
@@ -349,7 +448,7 @@ export async function prepareQuestion(
   ]);
 }
 
-async function transition(
+async function transitionInstructions(
   direction: "split" | "merge",
   client: LiveClient,
   collateral: CollateralRef,
@@ -357,7 +456,7 @@ async function transition(
   condition: ConditionRef,
   partition: readonly IndexSetWords[],
   amount: bigint,
-): Promise<readonly Signature[]> {
+): Promise<readonly Instruction[]> {
   const owner = client.payer;
   const { conditionId, outcomeCount } = condition;
   const collateralMint = collateral.mint;
@@ -377,7 +476,7 @@ async function transition(
       acceptIssuerControlled: collateral.issuerControlled,
     };
     if (direction === "merge") {
-      return send(client, [create, await getMergeRootCollateralInstruction(input)]);
+      return [create, await getMergeRootCollateralInstruction(input)];
     }
     const setup = await getRootCollateralSetupInstructions({
       payer: owner,
@@ -387,10 +486,10 @@ async function transition(
       outcomeCount,
       partition,
     });
-    return send(client, [
+    return [
       ...(await withoutExisting(client, setup)),
       await getSplitRootCollateralInstruction(input),
-    ]);
+    ];
   }
 
   const parentCollectionId = collectionIdOf(parent);
@@ -415,12 +514,35 @@ async function transition(
       partition,
     })),
   ];
-  return send(client, [
+  return [
     ...(await withoutExisting(client, setup)),
     direction === "split"
       ? await getSplitNativePositionInstruction(input)
       : await getMergeNativePositionsInstruction(input),
-  ]);
+  ];
+}
+
+async function transition(
+  direction: "split" | "merge",
+  client: LiveClient,
+  collateral: CollateralRef,
+  parent: readonly ConditionClause[],
+  condition: ConditionRef,
+  partition: readonly IndexSetWords[],
+  amount: bigint,
+): Promise<readonly Signature[]> {
+  return send(
+    client,
+    await transitionInstructions(
+      direction,
+      client,
+      collateral,
+      parent,
+      condition,
+      partition,
+      amount,
+    ),
+  );
 }
 
 // `parent` is the position being refined, without the question in `condition`.
@@ -433,6 +555,108 @@ export function split(
   amount: bigint,
 ): Promise<readonly Signature[]> {
   return transition("split", client, collateral, parent, condition, partition, amount);
+}
+
+export type TakePositionOptions = Readonly<{
+  operationId: string;
+  storage: WebStorage;
+  checkpointPrefix?: string;
+  onStep?: (completed: number, total: number) => void | Promise<void>;
+}>;
+
+function takePositionPlanId(
+  owner: Address,
+  collateralMint: Address,
+  path: readonly ConditionClause[],
+  amount: bigint,
+  operationId: string,
+): string {
+  return `take-position:${owner}:${collateralMint}:${bytesHex(collectionIdOf(path))}:${amount}:${operationId}`;
+}
+
+function takePositionStepId(depth: number): string {
+  return `factor:${depth}`;
+}
+
+// Deposits and splits once per question, down to the position `path` names. Confirmed steps
+// are reconciled from persistent checkpoints before any transaction is sent again.
+export async function takePosition(
+  client: LiveClient,
+  collateral: CollateralRef,
+  path: readonly ConditionClause[],
+  amount: bigint,
+  options: TakePositionOptions,
+): Promise<readonly Signature[]> {
+  const planId = takePositionPlanId(
+    client.payer.address,
+    collateral.mint,
+    path,
+    amount,
+    options.operationId,
+  );
+  const checkpointStore = new WebStoragePlanCheckpointStore<
+    PreparedCcTokenTransaction,
+    Signature,
+    bigint
+  >(options.storage, options.checkpointPrefix);
+  const signatures: Signature[] = [];
+  for (let depth = 0; depth < path.length; depth += 1) {
+    const { conditionId, outcomeCount, indexSet } = path[depth]!;
+    const instructions = await transitionInstructions(
+      "split",
+      client,
+      collateral,
+      path.slice(0, depth),
+      { conditionId, outcomeCount },
+      [indexSet, complementIndexSet(outcomeCount, indexSet)],
+      amount,
+    );
+    const transitionInstruction = instructions.at(-1);
+    if (!transitionInstruction) throw new Error("a position acquisition step has no instructions");
+    const setup = instructions.slice(0, -1);
+    if (setup.length > 0) signatures.push(...(await send(client, setup)));
+    const step: TransactionInstructionPlanStep = {
+      id: takePositionStepId(depth),
+      planId,
+      kind: "execute",
+      instructions: [transitionInstruction],
+    };
+    const factors = path.slice(0, depth + 1);
+    const adapter = createKitExecutionAdapter({
+      rpc: client.rpc,
+      feePayer: client.payer,
+      checkpointStore,
+      version: 0,
+      async refetch() {
+        const positionId = derivePositionId(collateral.mint, collectionIdOf(factors));
+        const [balance] = await getPositionBalanceAddress(client.payer.address, positionId);
+        const account = await generatedClient.fetchMaybePositionBalance(client.rpc, balance);
+        if (!account.exists) throw new Error("position balance was not found after confirmation");
+        return account.data.amount;
+      },
+    });
+    const [receipt] = await executeConfirmedPlan([step], adapter);
+    if (!receipt) throw new Error("position acquisition step did not produce a receipt");
+    signatures.push(receipt.signature);
+    await options.onStep?.(depth + 1, path.length);
+  }
+  return signatures;
+}
+
+export async function clearTakePositionCheckpoints(
+  owner: Address,
+  collateralMint: Address,
+  path: readonly ConditionClause[],
+  amount: bigint,
+  options: Pick<TakePositionOptions, "operationId" | "storage" | "checkpointPrefix">,
+): Promise<void> {
+  const store = new WebStoragePlanCheckpointStore(options.storage, options.checkpointPrefix);
+  const planId = takePositionPlanId(owner, collateralMint, path, amount, options.operationId);
+  await Promise.all(path.map((_, depth) => store.remove(planId, takePositionStepId(depth))));
+}
+
+function bytesHex(bytes: ReadonlyUint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function merge(

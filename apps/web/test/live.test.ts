@@ -2,11 +2,27 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { deriveConditionId, type ConditionClause } from "@cc-token/sdk";
-import { getAddressDecoder } from "@solana/kit";
+import {
+  getAddressDecoder,
+  SolanaError,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
+} from "@solana/kit";
 
-import { COLLATERAL_KEY, layoutGraph } from "../src/ledger.ts";
-import { getNameTokenInstruction, TEST_TOKEN_NAME } from "../src/live/chain.ts";
-import { decodeTokenLabel, ledgerFromPositions } from "../src/live/discovery.ts";
+import { describeError } from "../src/errors.ts";
+import { COLLATERAL_KEY, layoutGraph, withPositionPath } from "../src/ledger.ts";
+import {
+  getNameTokenInstruction,
+  inBatches,
+  TEST_TOKEN_NAME,
+  tokenLabelProblem,
+} from "../src/live/chain.ts";
+import { createPacer, pacedRpc } from "../src/live/pacing.ts";
+import {
+  decodeTokenLabel,
+  ledgerFromPositions,
+  positionsForScenario,
+  whenAllowed,
+} from "../src/live/discovery.ts";
 import {
   loadQuestions,
   newQuestion,
@@ -17,10 +33,31 @@ import {
   unnamedCondition,
 } from "../src/live/questions.ts";
 import { holdingKey, indexSetFromOutcomes, toHex } from "../src/scenario.ts";
+import { liveScenarioRoute, scenarioAddressFromRoute } from "../src/routes.ts";
 
 const resolver = getAddressDecoder().decode(new Uint8Array(32).fill(5));
 const weather = toCondition(newQuestion(resolver, "Weather", ["sun", "rain", "snow"], "salt"));
 const launch = toCondition(newQuestion(resolver, "Launch", ["on time", "late"], "salt"));
+const vote = toCondition(newQuestion(resolver, "ETF vote", ["approved", "rejected"], "salt"));
+
+test("HTTP rate limits are described without hiding the status", () => {
+  const error = new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+    headers: new Headers({ "retry-after": "10" }),
+    message: "",
+    statusCode: 429,
+  });
+  assert.equal(
+    describeError(error),
+    "The Solana RPC rate limit was reached. Retry after 10 seconds.",
+  );
+});
+
+test("scenario routes preserve canonical account addresses", () => {
+  const scenario = "Vote111111111111111111111111111111111111111";
+  assert.equal(scenarioAddressFromRoute(liveScenarioRoute(scenario)), scenario);
+  assert.equal(scenarioAddressFromRoute("#/live"), null);
+  assert.equal(scenarioAddressFromRoute("#/live/scenario/"), null);
+});
 
 function on(condition: typeof weather, outcomes: readonly number[]): ConditionClause {
   return {
@@ -143,6 +180,42 @@ test("a position held only as wrapped tokens stays on the graph", () => {
   assert.equal(ledger.portfolio.holdings.length, 0);
 });
 
+test("a scenario path stays visible without materialized balances", () => {
+  const sun = on(weather, [0]);
+  const onTime = on(launch, [0]);
+  const empty = ledgerFromPositions(0n, []);
+  const ledger = withPositionPath(empty, [sun, onTime]);
+
+  assert.ok(ledger.nodes.some((node) => node.key === holdingKey([sun])));
+  assert.ok(ledger.nodes.some((node) => node.key === holdingKey([on(weather, [1, 2])])));
+  assert.ok(ledger.nodes.some((node) => node.key === holdingKey([sun, onTime])));
+  assert.ok(ledger.nodes.some((node) => node.key === holdingKey([sun, on(launch, [1])])));
+  assert.equal(ledger.portfolio.holdings.length, 0);
+});
+
+test("scenario graphs include only positions from their condition basis", () => {
+  const sol = on(weather, [0]);
+  const onTime = on(launch, [0]);
+  const approved = on(vote, [0]);
+  const shared = { factors: [sol], amount: 1n, wrapped: 0n, wrapperMint: null };
+  const launchOnly = {
+    factors: [sol, onTime],
+    amount: 1n,
+    wrapped: 0n,
+    wrapperMint: null,
+  };
+  const voteOnly = {
+    factors: [sol, approved],
+    amount: 1n,
+    wrapped: 0n,
+    wrapperMint: null,
+  };
+  const positions = [shared, launchOnly, voteOnly];
+
+  assert.deepEqual(positionsForScenario([sol, onTime], positions), [shared, launchOnly]);
+  assert.deepEqual(positionsForScenario([sol, approved], positions), [shared, voteOnly]);
+});
+
 test("the narrowest containing position is the source", () => {
   const all = on(weather, [0, 1]);
   const ledger = ledgerFromPositions(0n, [
@@ -156,6 +229,156 @@ test("the narrowest containing position is the source", () => {
     ledger.edges.map((edge) => edge.from),
     [COLLATERAL_KEY, parent, parent],
   );
+});
+
+test("long account lists are read at most 100 at a time, in order", async () => {
+  const addresses = Array.from({ length: 250 }, (_, index) => index);
+  const requests: number[] = [];
+  const accounts = await inBatches(addresses, async (batch) => {
+    requests.push(batch.length);
+    return batch.map((address) => address * 2);
+  });
+  assert.deepEqual(requests, [100, 100, 50]);
+  assert.deepEqual(
+    accounts,
+    addresses.map((address) => address * 2),
+  );
+  assert.deepEqual(await inBatches([], async () => assert.fail("nothing to read")), []);
+});
+
+test("a read turned away by a busy endpoint is repeated, other failures are not", async () => {
+  const refused = (statusCode: number) =>
+    new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+      headers: new Headers(),
+      message: "refused",
+      statusCode,
+    });
+  let reads = 0;
+  const read = (failures: number, statusCode: number) => async () => {
+    reads += 1;
+    if (reads <= failures) throw refused(statusCode);
+    return "wording";
+  };
+  assert.equal(await whenAllowed(read(2, 429), 4, 0), "wording");
+  assert.equal(reads, 3);
+  reads = 0;
+  await assert.rejects(whenAllowed(read(4, 429), 4, 0));
+  assert.equal(reads, 4);
+  reads = 0;
+  await assert.rejects(whenAllowed(read(1, 500), 4, 0));
+  assert.equal(reads, 1);
+});
+
+test("requests go out a few at a time and are repeated when turned away", async () => {
+  const refused = () =>
+    new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+      headers: new Headers(),
+      message: "refused",
+      statusCode: 429,
+    });
+  const pace = createPacer({ concurrency: 2, attempts: 3, delay: 0 });
+  let active = 0;
+  let peak = 0;
+  const results = await Promise.all(
+    Array.from({ length: 7 }, (_, index) =>
+      pace(async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        active -= 1;
+        return index;
+      }),
+    ),
+  );
+  assert.deepEqual(results, [0, 1, 2, 3, 4, 5, 6]);
+  assert.equal(peak, 2);
+
+  let sends = 0;
+  const rpc = pacedRpc(
+    {
+      getSlot: () => ({
+        send: async () => {
+          sends += 1;
+          if (sends < 3) throw refused();
+          return 7n;
+        },
+      }),
+      getHealth: () => ({
+        send: async () => {
+          throw refused();
+        },
+      }),
+    },
+    pace,
+  );
+  assert.equal(await rpc.getSlot().send(), 7n);
+  assert.equal(sends, 3);
+  await assert.rejects(rpc.getHealth().send());
+  // A failure gives its place back.
+  assert.equal(await pace(async () => "free"), "free");
+});
+
+test("the same read asked for twice at once is sent once", async () => {
+  const sent: string[] = [];
+  let fail = true;
+  const rpc = pacedRpc(
+    {
+      getAccountInfo: (address: string, config?: { minContextSlot?: bigint }) => ({
+        send: async () => {
+          sent.push(`${address}:${config?.minContextSlot ?? ""}`);
+          return address;
+        },
+      }),
+      getLatestBlockhash: () => ({
+        send: async () => {
+          sent.push("blockhash");
+          return "hash";
+        },
+      }),
+      getBalance: () => ({
+        send: async () => {
+          sent.push("balance");
+          if (fail) throw new Error("unreachable");
+          return 1n;
+        },
+      }),
+    },
+    createPacer({ delay: 0 }),
+    20,
+  );
+  assert.deepEqual(
+    await Promise.all([
+      rpc.getAccountInfo("a").send(),
+      rpc.getAccountInfo("a").send(),
+      rpc.getAccountInfo("b").send(),
+      // A read after a transaction names its slot and is its own request.
+      rpc.getAccountInfo("a", { minContextSlot: 5n }).send(),
+    ]),
+    ["a", "a", "b", "a"],
+  );
+  assert.deepEqual(sent, ["a:", "b:", "a:5"]);
+
+  // After a moment the answer is no longer reused.
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  await rpc.getAccountInfo("a").send();
+  assert.equal(sent.length, 4);
+
+  // What has to be current is always sent, and a failure is not remembered.
+  await Promise.all([rpc.getLatestBlockhash().send(), rpc.getLatestBlockhash().send()]);
+  assert.equal(sent.filter((entry) => entry === "blockhash").length, 2);
+  await assert.rejects(rpc.getBalance().send());
+  fail = false;
+  assert.equal(await rpc.getBalance().send(), 1n);
+});
+
+test("a token name and symbol must fit what the metadata program stores", () => {
+  assert.equal(tokenLabelProblem(TEST_TOKEN_NAME), null);
+  assert.equal(tokenLabelProblem({ name: "a".repeat(32), symbol: "ABCDEFGHIJ" }), null);
+  assert.match(tokenLabelProblem({ name: "a".repeat(33), symbol: "A" })!, /name/);
+  assert.match(tokenLabelProblem({ name: "é".repeat(17), symbol: "A" })!, /name/);
+  assert.match(tokenLabelProblem({ name: " ", symbol: "A" })!, /name/);
+  assert.match(tokenLabelProblem({ name: "Fed rates", symbol: "ABCDEFGHIJK" })!, /symbol/);
+  assert.match(tokenLabelProblem({ name: "Fed rates", symbol: "" })!, /symbol/);
 });
 
 test("a token's name is read from its metadata account and tied to its mint", () => {

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { TOKEN_2022_PROGRAM_ADDRESS, type ConditionClause } from "@cc-token/sdk";
+import {
+  classifyScenarioParticipation,
+  fetchAllVerifiedScenarios,
+  fetchVerifiedScenario,
+  TOKEN_2022_PROGRAM_ADDRESS,
+  type ConditionClause,
+} from "@cc-token/sdk";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
@@ -12,13 +18,17 @@ import { solanaRpc } from "@solana/kit-plugin-rpc";
 
 import { COLLATERAL_KEY } from "../src/ledger.ts";
 import {
+  clearTakePositionCheckpoints,
   createTestCollateral,
   merge,
   mintTestCollateral,
   prepareQuestion,
+  publishScenario,
   redeem,
   reportPayouts,
+  renameScenario,
   split,
+  takePosition,
   transfer,
   unwrap,
   wrap,
@@ -29,11 +39,12 @@ import {
   fetchHeldCollaterals,
   fetchPositions,
   ledgerFromPositions,
+  positionsForScenario,
   recoverQuestion,
   whenCaughtUp,
 } from "../src/live/discovery.ts";
 import { newQuestion, questionMemo, toCondition } from "../src/live/questions.ts";
-import { holdingKey, indexSetFromOutcomes } from "../src/scenario.ts";
+import { holdingKey, indexSetFromOutcomes, toHex } from "../src/scenario.ts";
 
 const rpcUrl = process.env.CC_TOKEN_RPC_URL;
 const rpcSubscriptionsUrl = process.env.CC_TOKEN_WS_URL;
@@ -75,9 +86,15 @@ test("the live page's transactions run the whole lifecycle", async () => {
   const weatherQuestion = newQuestion(owner, "Weather", ["sun", "rain", "snow"], "a");
   const weather = toCondition(weatherQuestion);
   const launch = toCondition(newQuestion(owner, "Launch", ["on time", "late"], "a"));
+  const venue = toCondition(newQuestion(owner, "Venue", ["Berlin", "Paris"], "a"));
   await prepareQuestion(client, weather.questionId, 3, questionMemo(weatherQuestion));
   await prepareQuestion(client, launch.questionId, 2);
-  const prepared = await fetchConditions(client.rpc, [weather.conditionId, launch.conditionId]);
+  await prepareQuestion(client, venue.questionId, 2);
+  const prepared = await fetchConditions(client.rpc, [
+    weather.conditionId,
+    launch.conditionId,
+    venue.conditionId,
+  ]);
   assert.equal(prepared.get(weather.key)?.outcomeCount, 3);
   assert.equal(prepared.get(launch.key)?.resolver, owner);
   assert.equal(prepared.get(launch.key)?.payouts, null);
@@ -85,10 +102,14 @@ test("the live page's transactions run the whole lifecycle", async () => {
   // The wording published with a question can be read back by anyone; without it, nothing.
   assert.deepEqual(await recoverQuestion(client.rpc, prepared.get(weather.key)!), weatherQuestion);
   assert.equal(await recoverQuestion(client.rpc, prepared.get(launch.key)!), null);
-  assert.deepEqual(await fetchHeldCollaterals(client.rpc, owner), []);
+  assert.deepEqual(await fetchHeldCollaterals(client.rpc, owner), {
+    collaterals: [],
+    wrappedChecked: true,
+  });
 
   const weatherRef = { conditionId: weather.conditionId, outcomeCount: 3 };
   const launchRef = { conditionId: launch.conditionId, outcomeCount: 2 };
+  const venueRef = { conditionId: venue.conditionId, outcomeCount: 2 };
   const on = (ref: typeof weatherRef, outcomes: readonly number[]): ConditionClause => ({
     ...ref,
     indexSet: indexSetFromOutcomes(outcomes),
@@ -99,6 +120,37 @@ test("the live page's transactions run the whole lifecycle", async () => {
   const rain = on(weatherRef, [1]);
   const onTime = on(launchRef, [0]);
   const late = on(launchRef, [1]);
+  const berlin = on(venueRef, [0]);
+
+  // Scenario publication registers a zero-balance anchor and becomes globally discoverable.
+  const published = await publishScenario(
+    client,
+    created.mint,
+    "Weather and launch",
+    [dry, onTime],
+    "logical",
+  );
+  assert.ok(published.signatures.length >= 1);
+  const scenario = await fetchVerifiedScenario(client.rpc, published.address);
+  assert.equal(scenario.definition.data.name, "Weather and launch");
+  assert.equal(scenario.factorCount, 2);
+  assert.equal(scenario.state, "active");
+  const discovery = await fetchAllVerifiedScenarios(client.rpc);
+  assert.ok(
+    discovery.scenarios.some((candidate) => candidate.definition.address === published.address),
+  );
+  assert.equal(discovery.failures.length, 0);
+  await renameScenario(client, scenario.definition.data.anchorPositionId, "Weather and launch v2");
+  const renamed = await fetchVerifiedScenario(client.rpc, published.address);
+  assert.equal(renamed.definition.data.name, "Weather and launch v2");
+  const secondPublished = await publishScenario(
+    client,
+    created.mint,
+    "Weather and venue",
+    [dry, berlin],
+    "logical",
+  );
+  const secondScenario = await fetchVerifiedScenario(client.rpc, secondPublished.address);
 
   async function balances(mint: Address = created.mint) {
     const { positions } = await fetchPositions(client.rpc, owner, mint);
@@ -113,6 +165,23 @@ test("the live page's transactions run the whole lifecycle", async () => {
   assert.equal(await free(), 900n * UNIT);
   assert.equal(await held([dry]), 100n * UNIT);
   assert.equal(await held([snow]), 100n * UNIT);
+  const dryPosition = (await fetchPositions(client.rpc, owner, created.mint)).positions.find(
+    (position) => holdingKey(position.factors) === holdingKey([dry]),
+  )!;
+  assert.equal(
+    classifyScenarioParticipation(scenario, {
+      collateralMint: created.mint,
+      factors: dryPosition.factors,
+    }),
+    "compatible",
+  );
+  assert.equal(
+    classifyScenarioParticipation(secondScenario, {
+      collateralMint: created.mint,
+      factors: dryPosition.factors,
+    }),
+    "compatible",
+  );
 
   // A read that names a slot is refused until the node has reached it, and retried.
   const ahead = { minContextSlot: (await client.rpc.getSlot().send()) + 1_000_000n };
@@ -134,8 +203,33 @@ test("the live page's transactions run the whole lifecycle", async () => {
   assert.equal(await held([snow]), 0n);
   assert.equal(await held([snow, onTime]), 100n * UNIT);
   assert.equal(await held([late, snow]), 100n * UNIT);
+  assert.equal(
+    classifyScenarioParticipation(scenario, {
+      collateralMint: created.mint,
+      factors: [snow, onTime],
+    }),
+    "exact",
+  );
 
   const { positions } = await fetchPositions(client.rpc, owner, created.mint);
+  assert.ok(
+    positionsForScenario([dry, onTime], positions).some(
+      (position) => holdingKey(position.factors) === holdingKey([dry]),
+    ),
+  );
+  assert.ok(
+    positionsForScenario([dry, berlin], positions).some(
+      (position) => holdingKey(position.factors) === holdingKey([dry]),
+    ),
+  );
+  assert.ok(
+    positionsForScenario([dry, berlin], positions).every((position) =>
+      position.factors.every(
+        (factor) =>
+          weather.key === toHex(factor.conditionId) || venue.key === toHex(factor.conditionId),
+      ),
+    ),
+  );
   const ledger = ledgerFromPositions(await free(), positions);
   const sourceOf = (factors: readonly ConditionClause[]) =>
     ledger.edges.find((edge) => edge.to === holdingKey(factors))?.from;
@@ -178,9 +272,41 @@ test("the live page's transactions run the whole lifecycle", async () => {
   assert.equal((await wrappedDry())?.amount, 55n * UNIT);
   assert.equal((await wrappedDry())?.wrapped, 15n * UNIT);
 
+  // When the wallet cannot be searched for wrapper tokens, the balances are still found.
+  const withoutTokenScan = new Proxy(client.rpc, {
+    get: (rpc, method, receiver) =>
+      method === "getTokenAccountsByOwner"
+        ? () => ({ send: () => Promise.reject(new Error("too many requests")) })
+        : Reflect.get(rpc, method, receiver),
+  });
+  const unscanned = await fetchPositions(withoutTokenScan, owner, created.mint);
+  assert.equal(unscanned.wrappedChecked, false);
+  const unscannedDry = unscanned.positions.find(
+    (position) => holdingKey(position.factors) === holdingKey([dry]),
+  );
+  assert.equal(unscannedDry?.amount, 55n * UNIT);
+  assert.equal(unscannedDry?.wrapped, 0n);
+  assert.equal((await fetchHeldCollaterals(withoutTokenScan, owner)).wrappedChecked, false);
+  assert.equal((await fetchPositions(client.rpc, owner, created.mint)).wrappedChecked, true);
+
   // The token moves like any other. Someone who only ever received it sees the position and
   // can unwrap it without having held a native balance.
   const stranger = await fundedClient();
+  // A creator can paste any registered mint; holding its token or a prior position is unnecessary.
+  const pastedCollateral = await fetchCollateral(stranger.rpc, stranger.payer.address, other.mint);
+  assert.equal(pastedCollateral.registered, true);
+  assert.equal(pastedCollateral.free, 0n);
+  const pastedScenario = await publishScenario(
+    stranger,
+    other.mint,
+    "Scenario on pasted collateral",
+    [dry],
+    "logical",
+  );
+  assert.equal(
+    (await fetchVerifiedScenario(stranger.rpc, pastedScenario.address)).definition.data.creator,
+    stranger.payer.address,
+  );
   const wrapperMint = (await wrappedDry())!.wrapperMint!;
   const tokenAccount = async (holder: Address) =>
     (
@@ -215,17 +341,19 @@ test("the live page's transactions run the whole lifecycle", async () => {
   const received = await fetchPositions(client.rpc, stranger.payer.address, created.mint);
   assert.equal(ledgerFromPositions(0n, received.positions).nodes.length, 1);
   // Starting from nothing but the wallet address: which collateral, then which question.
-  assert.deepEqual(await fetchHeldCollaterals(client.rpc, stranger.payer.address), [
-    { mint: created.mint, positions: 1, label: null },
-  ]);
+  assert.deepEqual(await fetchHeldCollaterals(client.rpc, stranger.payer.address), {
+    collaterals: [{ mint: created.mint, positions: 1, label: null }],
+    wrappedChecked: true,
+  });
   const [receivedCondition] = [...received.conditions.values()];
   assert.equal(
     (await recoverQuestion(stranger.rpc, receivedCondition!))?.title,
     weatherQuestion.title,
   );
-  assert.deepEqual(await fetchHeldCollaterals(client.rpc, owner), [
-    { mint: created.mint, positions: 3, label: null },
-  ]);
+  assert.deepEqual(await fetchHeldCollaterals(client.rpc, owner), {
+    collaterals: [{ mint: created.mint, positions: 3, label: null }],
+    wrappedChecked: true,
+  });
   await unwrap(stranger, collateral, [dry], 5n * UNIT);
   assert.equal((await wrappedDry(stranger.payer.address))?.amount, 5n * UNIT);
   assert.equal((await wrappedDry(stranger.payer.address))?.wrapped, 0n);
@@ -238,9 +366,10 @@ test("the live page's transactions run the whole lifecycle", async () => {
   await transfer(client, collateral, [dry], friend, 2n * UNIT);
   assert.equal((await wrappedDry(friend))?.amount, 5n * UNIT);
   assert.equal((await wrappedDry())?.amount, 60n * UNIT);
-  assert.deepEqual(await fetchHeldCollaterals(client.rpc, friend), [
-    { mint: created.mint, positions: 1, label: null },
-  ]);
+  assert.deepEqual(await fetchHeldCollaterals(client.rpc, friend), {
+    collaterals: [{ mint: created.mint, positions: 1, label: null }],
+    wrappedChecked: true,
+  });
   await assert.rejects(transfer(client, collateral, [dry], owner, UNIT));
   await assert.rejects(transfer(client, collateral, [dry], friend, 61n * UNIT));
 
@@ -266,4 +395,37 @@ test("the live page's transactions run the whole lifecycle", async () => {
 
   await mintTestCollateral(client, collateral, 5n * UNIT);
   assert.equal(await free(), 1_005n * UNIT);
+
+  // A scenario acquisition resumes after its first confirmed split without depositing twice.
+  const stored = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => stored.get(key) ?? null,
+    setItem: (key: string, value: string) => void stored.set(key, value),
+    removeItem: (key: string) => void stored.delete(key),
+  };
+  const takeOptions = {
+    operationId: "interrupted-acquisition",
+    storage,
+    checkpointPrefix: "test:take:",
+  };
+  await assert.rejects(
+    takePosition(client, collateral, [sun, onTime], 5n * UNIT, {
+      ...takeOptions,
+      onStep(completed) {
+        if (completed === 1) throw new Error("browser closed");
+      },
+    }),
+    /browser closed/,
+  );
+  assert.equal(await free(), 1_000n * UNIT);
+  assert.equal(await held([sun]), 5n * UNIT);
+  assert.equal(await held([sun, onTime]), 0n);
+  const taken = await takePosition(client, collateral, [sun, onTime], 5n * UNIT, takeOptions);
+  assert.ok(taken.length >= 2);
+  assert.equal(await free(), 1_000n * UNIT);
+  assert.equal(await held([sun, onTime]), 5n * UNIT);
+  assert.equal(await held([sun, late]), 5n * UNIT);
+  assert.equal(await held([sun]), 0n);
+  await clearTakePositionCheckpoints(owner, created.mint, [sun, onTime], 5n * UNIT, takeOptions);
+  assert.equal(stored.size, 0);
 });

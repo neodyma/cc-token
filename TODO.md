@@ -133,16 +133,19 @@
 - [x] Browser simulator: position graph, split, merge, simulated market and redemption
 - [x] Condition and position inspection
 - [x] Grouped partition construction
-- [ ] Market/Scenario discovery
+- [x] Market/Scenario discovery
 - [x] User / "receiver" flow: positions and wrapped tokens sent to a wallet are found from its address, with their question wording (local validator)
-- [ ] "Creator" workflow
+- [x] "Creator" workflow
 - [x] Split, merge, transfer, resolve, redeem, wrap and unwrap flows on the Live page (local validator)
+- [x] Scenario pages open as read-only or connected graphs; scenario creation accepts new, known and pasted collateral mints
+- [x] Scenario graphs exclude unrelated positions while shared positions remain compatible with multiple scenarios
+- [x] Featured-position acquisition resumes confirmed splits without depositing twice
 - [ ] Live page exercised end to end from a browser wallet on devnet
 - [ ] Native/compressed balance breakdown
 - [x] Optional advanced multiplicative construction
 - [ ] Version-0-only wallet behavior
 - [ ] Optional transaction v1 behavior
-- [ ] Browser error and interrupted-flow tests
+- [ ] Browser wallet rejection and error-state tests
 - [x] Opt-in server-side Vercel RPC proxy
 - [ ] Complete LOI demonstration
 
@@ -150,7 +153,7 @@
 
 - [ ] Full deterministic and property-test suite
 - [ ] Conservation model across native, compressed and wrapped balances (deferred)
-- [ ] Clean build
+- [x] Clean build
 - [ ] CU, transaction-size, account, heap and rent measurements
 - [ ] Supported collateral and authority documentation
 - [ ] Rounding and resolution documentation
@@ -159,5 +162,6 @@
 - [ ] Implementation-aligned architecture diagram
 - [ ] Public protocol and API documentation
 - [x] Deployment checklist, scripts and initial devnet deployment
-- [ ] Vercel deployment
-- [ ] IDL deployment
+- [x] Scenario definition devnet upgrade and initial backfill
+- [x] Vercel deployment
+- [x] IDL deployment

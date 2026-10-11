@@ -66,6 +66,11 @@ transaction. `MemoryPlanCheckpointStore` supports transient execution and tests.
 refetched state for browser restarts. Persist the store before allowing users to submit resumable
 plans.
 
+The Live scenario acquisition uses the same executor for one checkpointed version-0 value
+transition per condition. Idempotent account setup is sent first and can safely be repeated if its
+result is unknown. The browser retains the operation identity and value-transition checkpoints
+until the complete featured position exists, then removes them.
+
 The program deliberately allows an owner to authorize the same split or transfer more than once.
 Those are distinct valid operations, so the contract cannot classify a newly signed repetition as
 accidental without adding operation-nonce state. Resubmitting the same signed transaction preserves

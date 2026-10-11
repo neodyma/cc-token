@@ -118,6 +118,12 @@ export const CC_TOKEN_ERROR__PAYOUT_REPORT_MISMATCH = 0x17a1; // 6049
 export const CC_TOKEN_ERROR__WRAPPER_MISMATCH = 0x17a2; // 6050
 /** WrapperMintMismatch: Wrapper mint is not the canonical mint for its position */
 export const CC_TOKEN_ERROR__WRAPPER_MINT_MISMATCH = 0x17a3; // 6051
+/** InvalidScenarioName: Scenario name must be 1 to 64 UTF-8 bytes without surrounding whitespace or control characters */
+export const CC_TOKEN_ERROR__INVALID_SCENARIO_NAME = 0x17a4; // 6052
+/** ScenarioMismatch: Scenario account does not match its registered definition */
+export const CC_TOKEN_ERROR__SCENARIO_MISMATCH = 0x17a5; // 6053
+/** UnauthorizedScenarioCreator: Only the scenario creator may rename it */
+export const CC_TOKEN_ERROR__UNAUTHORIZED_SCENARIO_CREATOR = 0x17a6; // 6054
 
 export type CcTokenError =
   | typeof CC_TOKEN_ERROR__ACCOUNT_NOT_WRITABLE
@@ -148,6 +154,7 @@ export type CcTokenError =
   | typeof CC_TOKEN_ERROR__INVALID_PAYOUT_FRACTION
   | typeof CC_TOKEN_ERROR__INVALID_POSITION_ID
   | typeof CC_TOKEN_ERROR__INVALID_REMAINING_ACCOUNTS
+  | typeof CC_TOKEN_ERROR__INVALID_SCENARIO_NAME
   | typeof CC_TOKEN_ERROR__INVALID_TRANSFER_ACCOUNTS
   | typeof CC_TOKEN_ERROR__INVALID_TRANSFER_DESTINATION
   | typeof CC_TOKEN_ERROR__ISSUER_CONTROLLED_COLLATERAL_NOT_ACCEPTED
@@ -163,9 +170,11 @@ export type CcTokenError =
   | typeof CC_TOKEN_ERROR__POSITION_MISMATCH
   | typeof CC_TOKEN_ERROR__ROOT_COLLATERAL_REQUIRED
   | typeof CC_TOKEN_ERROR__ROOT_POSITION
+  | typeof CC_TOKEN_ERROR__SCENARIO_MISMATCH
   | typeof CC_TOKEN_ERROR__SELF_TRANSFER
   | typeof CC_TOKEN_ERROR__TRANSFER_BATCH_TOO_LARGE
   | typeof CC_TOKEN_ERROR__UNAUTHORIZED_RESOLVER
+  | typeof CC_TOKEN_ERROR__UNAUTHORIZED_SCENARIO_CREATOR
   | typeof CC_TOKEN_ERROR__UNEXPECTED_PARENT_COLLECTION
   | typeof CC_TOKEN_ERROR__UNSUPPORTED_COLLATERAL_EXTENSION
   | typeof CC_TOKEN_ERROR__WRAPPER_MINT_MISMATCH
@@ -204,6 +213,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [CC_TOKEN_ERROR__INVALID_PAYOUT_FRACTION]: `Payout numerator must not exceed its denominator`,
     [CC_TOKEN_ERROR__INVALID_POSITION_ID]: `Position ID does not match its definition`,
     [CC_TOKEN_ERROR__INVALID_REMAINING_ACCOUNTS]: `Remaining accounts must contain one position and balance pair per partition item`,
+    [CC_TOKEN_ERROR__INVALID_SCENARIO_NAME]: `Scenario name must be 1 to 64 UTF-8 bytes without surrounding whitespace or control characters`,
     [CC_TOKEN_ERROR__INVALID_TRANSFER_ACCOUNTS]: `Transfer accounts must contain one position, source and destination per amount`,
     [CC_TOKEN_ERROR__INVALID_TRANSFER_DESTINATION]: `A single transfer requires exactly one destination balance account`,
     [CC_TOKEN_ERROR__ISSUER_CONTROLLED_COLLATERAL_NOT_ACCEPTED]: `Issuer-controlled collateral requires explicit acceptance`,
@@ -219,9 +229,11 @@ if (process.env["NODE_ENV"] !== "production") {
     [CC_TOKEN_ERROR__POSITION_MISMATCH]: `Position account does not match its registered definition`,
     [CC_TOKEN_ERROR__ROOT_COLLATERAL_REQUIRED]: `A root full-partition transition requires a collateral handler`,
     [CC_TOKEN_ERROR__ROOT_POSITION]: `The collateral root does not have a position ID`,
+    [CC_TOKEN_ERROR__SCENARIO_MISMATCH]: `Scenario account does not match its registered definition`,
     [CC_TOKEN_ERROR__SELF_TRANSFER]: `Source and destination owners must differ`,
     [CC_TOKEN_ERROR__TRANSFER_BATCH_TOO_LARGE]: `A transfer batch contains too many positions`,
     [CC_TOKEN_ERROR__UNAUTHORIZED_RESOLVER]: `Only the condition resolver may report payouts`,
+    [CC_TOKEN_ERROR__UNAUTHORIZED_SCENARIO_CREATOR]: `Only the scenario creator may rename it`,
     [CC_TOKEN_ERROR__UNEXPECTED_PARENT_COLLECTION]: `Root collections must not provide a parent account`,
     [CC_TOKEN_ERROR__UNSUPPORTED_COLLATERAL_EXTENSION]: `Collateral mint uses an unsupported Token-2022 extension`,
     [CC_TOKEN_ERROR__WRAPPER_MINT_MISMATCH]: `Wrapper mint is not the canonical mint for its position`,

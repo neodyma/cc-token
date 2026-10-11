@@ -106,4 +106,10 @@ pub enum CcTokenError {
     WrapperMismatch,
     #[msg("Wrapper mint is not the canonical mint for its position")]
     WrapperMintMismatch,
+    #[msg("Scenario name must be 1 to 64 UTF-8 bytes without surrounding whitespace or control characters")]
+    InvalidScenarioName,
+    #[msg("Scenario account does not match its registered definition")]
+    ScenarioMismatch,
+    #[msg("Only the scenario creator may rename it")]
+    UnauthorizedScenarioCreator,
 }

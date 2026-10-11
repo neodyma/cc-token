@@ -40,7 +40,7 @@ pnpm format:check
 
 - **How it works** explains the protocol in plain terms.
 - **Simulator** is one interactive graph of positions: prepare questions, deposit, split, merge, trade against a simulated market maker, report results and redeem. It uses the SDK for identifiers and payouts and sends no transactions.
-- **Live** runs the same graph against the program deployed on devnet. With a connected wallet it creates a test collateral token, prepares questions, deposits, splits, merges, sends positions to other wallets, wraps and unwraps them as Token-2022 tokens, reports results and redeems, each as real transactions. It reads positions back from the program's accounts. See [docs/devnet.md](docs/devnet.md).
+- **Live** runs the same graph against the program deployed on devnet. It lists named scenarios directly from program accounts and opens their featured paths as read-only graphs without requiring a wallet. With a connected wallet, the graph adds compatible holdings and one action to take the featured position. A dialog creates a scenario from a new test token, a known token or a pasted mint. From a graph the wallet can deposit, split, merge, send positions, wrap and unwrap Token-2022 representations, report results and redeem. See [docs/devnet.md](docs/devnet.md).
 
 ```sh
 pnpm install --frozen-lockfile
@@ -61,7 +61,7 @@ run unless `--execute` is supplied.
 
 | Cluster | Program                                                                                                                                           | Source                                                                                           |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Devnet  | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet) | [`f4ade4a`](https://github.com/neodyma/cc-token/commit/f4ade4ad1df6a7bd6e090376e5b3a7f00f015266) |
+| Devnet  | [`JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW`](https://explorer.solana.com/address/JD3GWECaXcJGUWnYdcGvKciNyFbsiPH7nw29AsZKEjNW?cluster=devnet) | [`bad5637`](https://github.com/neodyma/cc-token/commit/bad563728501223feb4be00739c96a90040278d5) |
 
 The complete public deployment record is in [deployments/devnet.json](deployments/devnet.json).
 

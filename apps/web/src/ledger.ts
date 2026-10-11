@@ -77,6 +77,18 @@ export function openLedger(
   return ledger;
 }
 
+// Keep the featured split path visible before any wallet has materialized its positions.
+export function withPositionPath(ledger: Ledger, factors: readonly ConditionClause[]): Ledger {
+  if (factors.length === 0) return ledger;
+  const path = openLedger(1n, factors, 1n);
+  const pathKeys = new Set(path.nodes.map((node) => node.key));
+  return {
+    portfolio: ledger.portfolio,
+    nodes: [...path.nodes, ...ledger.nodes.filter((node) => !pathKeys.has(node.key))],
+    edges: [...path.edges, ...ledger.edges.filter((edge) => !pathKeys.has(edge.to))],
+  };
+}
+
 export function split(
   ledger: Ledger,
   parent: readonly ConditionClause[],

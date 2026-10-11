@@ -45,6 +45,28 @@ The issuer can freeze token accounts outside the cc-token program. Merge and red
 a policy gate, but their token transfer can fail while the affected vault or destination account is
 frozen.
 
+## Scenarios
+
+`ScenarioDefinition` is a fixed-size discovery descriptor over an existing canonical position.
+`fetchAllVerifiedScenarios` enumerates descriptors from program accounts, authenticates their
+anchors and shared collection witnesses, and isolates malformed rows. `fetchVerifiedScenario`
+loads one descriptor for a detail page.
+
+`planScenarioAnchor` builds missing collection definitions, the zero-balance anchor position and
+the final registration instruction. Logical mode intersects repeated clauses for one condition;
+product mode preserves repeated factors. The final scenario registration is always separate from
+the reusable setup list so clients can submit it last.
+
+`classifyScenarioParticipation` compares authenticated collateral and condition-ID multisets.
+`exact` positions contain the complete scenario basis, `compatible` positions contain a nonempty
+proper submultiset, and `unrelated` positions match neither. Subset masks select claims and do not
+claim historical provenance. `classifyScenarioFactors` applies the same multiset comparison when
+the caller has already established the shared collateral domain.
+
+`fetchCanonicalWrapperConfigs` lets wallet discovery intersect Token-2022 accounts with canonical
+program wrappers before reading mint accounts. Unrelated wallet tokens therefore do not create one
+mint lookup each.
+
 ## Wrapper metadata
 
 `initialize_wrapper` creates a position's Token-2022 mint with a metadata pointer to itself and

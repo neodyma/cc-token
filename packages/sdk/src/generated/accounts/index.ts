@@ -12,4 +12,5 @@ export * from "./condition.ts";
 export * from "./payoutReport.ts";
 export * from "./positionBalance.ts";
 export * from "./positionDefinition.ts";
+export * from "./scenarioDefinition.ts";
 export * from "./wrapperConfig.ts";

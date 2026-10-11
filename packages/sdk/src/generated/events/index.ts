@@ -23,4 +23,6 @@ export * from "./positionSplit.ts";
 export * from "./positionTransferred.ts";
 export * from "./positionUnwrapped.ts";
 export * from "./positionWrapped.ts";
+export * from "./scenarioNameUpdated.ts";
+export * from "./scenarioRegistered.ts";
 export * from "./wrapperInitialized.ts";
