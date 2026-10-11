@@ -41,6 +41,7 @@ import {
   getPayoutReportCodec,
   getPositionBalanceCodec,
   getPositionDefinitionCodec,
+  getScenarioDefinitionCodec,
   getWrapperConfigCodec,
   type CollateralConfig,
   type CollateralConfigArgs,
@@ -54,6 +55,8 @@ import {
   type PositionBalanceArgs,
   type PositionDefinition,
   type PositionDefinitionArgs,
+  type ScenarioDefinition,
+  type ScenarioDefinitionArgs,
   type WrapperConfig,
   type WrapperConfigArgs,
 } from "../accounts/index.ts";
@@ -74,11 +77,13 @@ import {
   getRegisterCollateralInstructionAsync,
   getRegisterCollectionInstruction,
   getRegisterPositionInstruction,
+  getRegisterScenarioInstruction,
   getReportPayoutsInstruction,
   getSplitFromCollateralInstructionAsync,
   getSplitPositionInstruction,
   getTransferPositionInstruction,
   getUnwrapPositionInstruction,
+  getUpdateScenarioNameInstruction,
   getWrapPositionInstruction,
   parseAppendPayoutReportInstruction,
   parseBatchTransferPositionsInstruction,
@@ -96,11 +101,13 @@ import {
   parseRegisterCollateralInstruction,
   parseRegisterCollectionInstruction,
   parseRegisterPositionInstruction,
+  parseRegisterScenarioInstruction,
   parseReportPayoutsInstruction,
   parseSplitFromCollateralInstruction,
   parseSplitPositionInstruction,
   parseTransferPositionInstruction,
   parseUnwrapPositionInstruction,
+  parseUpdateScenarioNameInstruction,
   parseWrapPositionInstruction,
   type AppendPayoutReportInput,
   type BatchTransferPositionsInput,
@@ -128,11 +135,13 @@ import {
   type ParsedRegisterCollateralInstruction,
   type ParsedRegisterCollectionInstruction,
   type ParsedRegisterPositionInstruction,
+  type ParsedRegisterScenarioInstruction,
   type ParsedReportPayoutsInstruction,
   type ParsedSplitFromCollateralInstruction,
   type ParsedSplitPositionInstruction,
   type ParsedTransferPositionInstruction,
   type ParsedUnwrapPositionInstruction,
+  type ParsedUpdateScenarioNameInstruction,
   type ParsedWrapPositionInstruction,
   type PrepareConditionInput,
   type RedeemPositionInput,
@@ -140,11 +149,13 @@ import {
   type RegisterCollateralAsyncInput,
   type RegisterCollectionInput,
   type RegisterPositionInput,
+  type RegisterScenarioInput,
   type ReportPayoutsInput,
   type SplitFromCollateralAsyncInput,
   type SplitPositionInput,
   type TransferPositionInput,
   type UnwrapPositionInput,
+  type UpdateScenarioNameInput,
   type WrapPositionInput,
 } from "../instructions/index.ts";
 import { findCollateralConfigPda, findVaultAuthorityPda } from "../pdas/index.ts";
@@ -159,14 +170,16 @@ export const CcTokenAccount = {
   3: "PayoutReport",
   4: "PositionBalance",
   5: "PositionDefinition",
-  6: "WrapperConfig",
+  6: "ScenarioDefinition",
+  7: "WrapperConfig",
   CollateralConfig: 0,
   CollectionDefinition: 1,
   Condition: 2,
   PayoutReport: 3,
   PositionBalance: 4,
   PositionDefinition: 5,
-  WrapperConfig: 6,
+  ScenarioDefinition: 6,
+  WrapperConfig: 7,
 } as const;
 
 export type CcTokenAccount = (typeof CcTokenAccount)[Exclude<keyof typeof CcTokenAccount, number>];
@@ -245,6 +258,17 @@ export function identifyCcTokenAccount(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([96, 226, 31, 206, 240, 184, 119, 91]),
+      ),
+      0,
+    )
+  ) {
+    return CcTokenAccount.ScenarioDefinition;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([83, 239, 35, 66, 9, 218, 15, 226]),
       ),
       0,
@@ -276,7 +300,9 @@ export const CcTokenEvent = {
   14: "PositionWrapped",
   15: "PositionsBatchTransferred",
   16: "PositionsMerged",
-  17: "WrapperInitialized",
+  17: "ScenarioNameUpdated",
+  18: "ScenarioRegistered",
+  19: "WrapperInitialized",
   CollateralMerged: 0,
   CollateralRedeemed: 1,
   CollateralRegistered: 2,
@@ -294,7 +320,9 @@ export const CcTokenEvent = {
   PositionWrapped: 14,
   PositionsBatchTransferred: 15,
   PositionsMerged: 16,
-  WrapperInitialized: 17,
+  ScenarioNameUpdated: 17,
+  ScenarioRegistered: 18,
+  WrapperInitialized: 19,
 } as const;
 
 export type CcTokenEvent = (typeof CcTokenEvent)[Exclude<keyof typeof CcTokenEvent, number>];
@@ -494,6 +522,28 @@ export function identifyCcTokenEvent(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([228, 133, 98, 101, 77, 124, 246, 210]),
+      ),
+      0,
+    )
+  ) {
+    return CcTokenEvent.ScenarioNameUpdated;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([219, 109, 122, 100, 15, 172, 234, 75]),
+      ),
+      0,
+    )
+  ) {
+    return CcTokenEvent.ScenarioRegistered;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([190, 218, 152, 11, 69, 5, 69, 223]),
       ),
       0,
@@ -521,12 +571,14 @@ export const CcTokenInstruction = {
   13: "RegisterCollateral",
   14: "RegisterCollection",
   15: "RegisterPosition",
-  16: "ReportPayouts",
-  17: "SplitFromCollateral",
-  18: "SplitPosition",
-  19: "TransferPosition",
-  20: "UnwrapPosition",
-  21: "WrapPosition",
+  16: "RegisterScenario",
+  17: "ReportPayouts",
+  18: "SplitFromCollateral",
+  19: "SplitPosition",
+  20: "TransferPosition",
+  21: "UnwrapPosition",
+  22: "UpdateScenarioName",
+  23: "WrapPosition",
   AppendPayoutReport: 0,
   BatchTransferPositions: 1,
   CancelPayoutReport: 2,
@@ -543,12 +595,14 @@ export const CcTokenInstruction = {
   RegisterCollateral: 13,
   RegisterCollection: 14,
   RegisterPosition: 15,
-  ReportPayouts: 16,
-  SplitFromCollateral: 17,
-  SplitPosition: 18,
-  TransferPosition: 19,
-  UnwrapPosition: 20,
-  WrapPosition: 21,
+  RegisterScenario: 16,
+  ReportPayouts: 17,
+  SplitFromCollateral: 18,
+  SplitPosition: 19,
+  TransferPosition: 20,
+  UnwrapPosition: 21,
+  UpdateScenarioName: 22,
+  WrapPosition: 23,
 } as const;
 
 export type CcTokenInstruction = (typeof CcTokenInstruction)[Exclude<
@@ -740,6 +794,17 @@ export function identifyCcTokenInstruction(
     containsBytes(
       data,
       fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([165, 81, 248, 78, 206, 16, 160, 231]),
+      ),
+      0,
+    )
+  ) {
+    return CcTokenInstruction.RegisterScenario;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
         new Uint8Array([133, 122, 65, 66, 174, 245, 105, 71]),
       ),
       0,
@@ -790,6 +855,17 @@ export function identifyCcTokenInstruction(
     )
   ) {
     return CcTokenInstruction.UnwrapPosition;
+  }
+  if (
+    containsBytes(
+      data,
+      fixEncoderSize(getBytesEncoder(), 8).encode(
+        new Uint8Array([190, 252, 213, 225, 200, 147, 120, 88]),
+      ),
+      0,
+    )
+  ) {
+    return CcTokenInstruction.UpdateScenarioName;
   }
   if (
     containsBytes(
@@ -860,6 +936,9 @@ export type ParsedCcTokenInstruction<
       instructionType: typeof CcTokenInstruction.RegisterPosition;
     } & ParsedRegisterPositionInstruction<TProgram>)
   | ({
+      instructionType: typeof CcTokenInstruction.RegisterScenario;
+    } & ParsedRegisterScenarioInstruction<TProgram>)
+  | ({
       instructionType: typeof CcTokenInstruction.ReportPayouts;
     } & ParsedReportPayoutsInstruction<TProgram>)
   | ({
@@ -874,6 +953,9 @@ export type ParsedCcTokenInstruction<
   | ({
       instructionType: typeof CcTokenInstruction.UnwrapPosition;
     } & ParsedUnwrapPositionInstruction<TProgram>)
+  | ({
+      instructionType: typeof CcTokenInstruction.UpdateScenarioName;
+    } & ParsedUpdateScenarioNameInstruction<TProgram>)
   | ({
       instructionType: typeof CcTokenInstruction.WrapPosition;
     } & ParsedWrapPositionInstruction<TProgram>);
@@ -995,6 +1077,13 @@ export function parseCcTokenInstruction<TProgram extends string>(
         ...parseRegisterPositionInstruction(instruction),
       };
     }
+    case CcTokenInstruction.RegisterScenario: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: CcTokenInstruction.RegisterScenario,
+        ...parseRegisterScenarioInstruction(instruction),
+      };
+    }
     case CcTokenInstruction.ReportPayouts: {
       assertIsInstructionWithAccounts(instruction);
       return {
@@ -1028,6 +1117,13 @@ export function parseCcTokenInstruction<TProgram extends string>(
       return {
         instructionType: CcTokenInstruction.UnwrapPosition,
         ...parseUnwrapPositionInstruction(instruction),
+      };
+    }
+    case CcTokenInstruction.UpdateScenarioName: {
+      assertIsInstructionWithAccounts(instruction);
+      return {
+        instructionType: CcTokenInstruction.UpdateScenarioName,
+        ...parseUpdateScenarioNameInstruction(instruction),
       };
     }
     case CcTokenInstruction.WrapPosition: {
@@ -1066,6 +1162,8 @@ export type CcTokenPluginAccounts = {
     SelfFetchFunctions<PositionBalanceArgs, PositionBalance>;
   positionDefinition: ReturnType<typeof getPositionDefinitionCodec> &
     SelfFetchFunctions<PositionDefinitionArgs, PositionDefinition>;
+  scenarioDefinition: ReturnType<typeof getScenarioDefinitionCodec> &
+    SelfFetchFunctions<ScenarioDefinitionArgs, ScenarioDefinition>;
   wrapperConfig: ReturnType<typeof getWrapperConfigCodec> &
     SelfFetchFunctions<WrapperConfigArgs, WrapperConfig>;
 };
@@ -1119,6 +1217,9 @@ export type CcTokenPluginInstructions = {
   registerPosition: (
     input: MakeOptional<RegisterPositionInput, "payer">,
   ) => ReturnType<typeof getRegisterPositionInstruction> & SelfPlanAndSendFunctions;
+  registerScenario: (
+    input: MakeOptional<RegisterScenarioInput, "payer">,
+  ) => ReturnType<typeof getRegisterScenarioInstruction> & SelfPlanAndSendFunctions;
   reportPayouts: (
     input: ReportPayoutsInput,
   ) => ReturnType<typeof getReportPayoutsInstruction> & SelfPlanAndSendFunctions;
@@ -1134,6 +1235,9 @@ export type CcTokenPluginInstructions = {
   unwrapPosition: (
     input: UnwrapPositionInput,
   ) => ReturnType<typeof getUnwrapPositionInstruction> & SelfPlanAndSendFunctions;
+  updateScenarioName: (
+    input: UpdateScenarioNameInput,
+  ) => ReturnType<typeof getUpdateScenarioNameInstruction> & SelfPlanAndSendFunctions;
   wrapPosition: (
     input: WrapPositionInput,
   ) => ReturnType<typeof getWrapPositionInstruction> & SelfPlanAndSendFunctions;
@@ -1162,6 +1266,7 @@ export function ccTokenProgram() {
           payoutReport: addSelfFetchFunctions(client, getPayoutReportCodec()),
           positionBalance: addSelfFetchFunctions(client, getPositionBalanceCodec()),
           positionDefinition: addSelfFetchFunctions(client, getPositionDefinitionCodec()),
+          scenarioDefinition: addSelfFetchFunctions(client, getScenarioDefinitionCodec()),
           wrapperConfig: addSelfFetchFunctions(client, getWrapperConfigCodec()),
         },
         instructions: {
@@ -1224,6 +1329,11 @@ export function ccTokenProgram() {
               client,
               getRegisterPositionInstruction({ ...input, payer: input.payer ?? client.payer }),
             ),
+          registerScenario: (input) =>
+            addSelfPlanAndSendFunctions(
+              client,
+              getRegisterScenarioInstruction({ ...input, payer: input.payer ?? client.payer }),
+            ),
           reportPayouts: (input) =>
             addSelfPlanAndSendFunctions(client, getReportPayoutsInstruction(input)),
           splitFromCollateral: (input) =>
@@ -1234,6 +1344,8 @@ export function ccTokenProgram() {
             addSelfPlanAndSendFunctions(client, getTransferPositionInstruction(input)),
           unwrapPosition: (input) =>
             addSelfPlanAndSendFunctions(client, getUnwrapPositionInstruction(input)),
+          updateScenarioName: (input) =>
+            addSelfPlanAndSendFunctions(client, getUpdateScenarioNameInstruction(input)),
           wrapPosition: (input) =>
             addSelfPlanAndSendFunctions(client, getWrapPositionInstruction(input)),
         },

@@ -42,6 +42,20 @@ pub mod cc_token {
         definitions::register_position(ctx, args)
     }
 
+    pub fn register_scenario(
+        ctx: Context<RegisterScenario>,
+        args: RegisterScenarioArgs,
+    ) -> CcTokenResult {
+        definitions::register_scenario(ctx, args)
+    }
+
+    pub fn update_scenario_name(
+        ctx: Context<UpdateScenarioName>,
+        args: UpdateScenarioNameArgs,
+    ) -> CcTokenResult {
+        definitions::update_scenario_name(ctx, args)
+    }
+
     pub fn initialize_balance(ctx: Context<InitializeBalance>) -> CcTokenResult {
         balance::initialize_balance(ctx)
     }

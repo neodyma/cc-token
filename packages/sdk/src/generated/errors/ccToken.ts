@@ -66,58 +66,64 @@ export const CC_TOKEN_ERROR__ISSUER_CONTROLLED_COLLATERAL_NOT_ACCEPTED = 0x1787;
 export const CC_TOKEN_ERROR__INVALID_POSITION_ID = 0x1788; // 6024
 /** PositionMismatch: Position account does not match its registered definition */
 export const CC_TOKEN_ERROR__POSITION_MISMATCH = 0x1789; // 6025
+/** InvalidScenarioName: Scenario name must be 1 to 64 UTF-8 bytes without surrounding whitespace or control characters */
+export const CC_TOKEN_ERROR__INVALID_SCENARIO_NAME = 0x178a; // 6026
+/** ScenarioMismatch: Scenario account does not match its registered definition */
+export const CC_TOKEN_ERROR__SCENARIO_MISMATCH = 0x178b; // 6027
+/** UnauthorizedScenarioCreator: Only the scenario creator may rename it */
+export const CC_TOKEN_ERROR__UNAUTHORIZED_SCENARIO_CREATOR = 0x178c; // 6028
 /** PositionBalanceMismatch: Position balance does not match its registered owner and position */
-export const CC_TOKEN_ERROR__POSITION_BALANCE_MISMATCH = 0x178a; // 6026
+export const CC_TOKEN_ERROR__POSITION_BALANCE_MISMATCH = 0x178d; // 6029
 /** NonzeroPositionBalance: A nonzero position balance cannot be closed */
-export const CC_TOKEN_ERROR__NONZERO_POSITION_BALANCE = 0x178b; // 6027
+export const CC_TOKEN_ERROR__NONZERO_POSITION_BALANCE = 0x178e; // 6030
 /** ZeroAmount: Amount must be greater than zero */
-export const CC_TOKEN_ERROR__ZERO_AMOUNT = 0x178c; // 6028
+export const CC_TOKEN_ERROR__ZERO_AMOUNT = 0x178f; // 6031
 /** FullCoverRequired: A collateral split or merge requires a full partition */
-export const CC_TOKEN_ERROR__FULL_COVER_REQUIRED = 0x178d; // 6029
+export const CC_TOKEN_ERROR__FULL_COVER_REQUIRED = 0x1790; // 6032
 /** RootCollateralRequired: A root full-partition transition requires a collateral handler */
-export const CC_TOKEN_ERROR__ROOT_COLLATERAL_REQUIRED = 0x178e; // 6030
+export const CC_TOKEN_ERROR__ROOT_COLLATERAL_REQUIRED = 0x1791; // 6033
 /** InvalidRemainingAccounts: Remaining accounts must contain one position and balance pair per partition item */
-export const CC_TOKEN_ERROR__INVALID_REMAINING_ACCOUNTS = 0x178f; // 6031
+export const CC_TOKEN_ERROR__INVALID_REMAINING_ACCOUNTS = 0x1792; // 6034
 /** AccountNotWritable: An account required for mutation is not writable */
-export const CC_TOKEN_ERROR__ACCOUNT_NOT_WRITABLE = 0x1790; // 6032
+export const CC_TOKEN_ERROR__ACCOUNT_NOT_WRITABLE = 0x1793; // 6035
 /** DuplicateAccount: An account appears more than once in the instruction */
-export const CC_TOKEN_ERROR__DUPLICATE_ACCOUNT = 0x1791; // 6033
+export const CC_TOKEN_ERROR__DUPLICATE_ACCOUNT = 0x1794; // 6036
 /** InsufficientPositionBalance: Position balance is insufficient */
-export const CC_TOKEN_ERROR__INSUFFICIENT_POSITION_BALANCE = 0x1792; // 6034
+export const CC_TOKEN_ERROR__INSUFFICIENT_POSITION_BALANCE = 0x1795; // 6037
 /** InvalidTransferDestination: A single transfer requires exactly one destination balance account */
-export const CC_TOKEN_ERROR__INVALID_TRANSFER_DESTINATION = 0x1793; // 6035
+export const CC_TOKEN_ERROR__INVALID_TRANSFER_DESTINATION = 0x1796; // 6038
 /** SelfTransfer: Source and destination owners must differ */
-export const CC_TOKEN_ERROR__SELF_TRANSFER = 0x1794; // 6036
+export const CC_TOKEN_ERROR__SELF_TRANSFER = 0x1797; // 6039
 /** EmptyTransferBatch: A transfer batch must contain at least one position */
-export const CC_TOKEN_ERROR__EMPTY_TRANSFER_BATCH = 0x1795; // 6037
+export const CC_TOKEN_ERROR__EMPTY_TRANSFER_BATCH = 0x1798; // 6040
 /** TransferBatchTooLarge: A transfer batch contains too many positions */
-export const CC_TOKEN_ERROR__TRANSFER_BATCH_TOO_LARGE = 0x1796; // 6038
+export const CC_TOKEN_ERROR__TRANSFER_BATCH_TOO_LARGE = 0x1799; // 6041
 /** InvalidTransferAccounts: Transfer accounts must contain one position, source and destination per amount */
-export const CC_TOKEN_ERROR__INVALID_TRANSFER_ACCOUNTS = 0x1797; // 6039
+export const CC_TOKEN_ERROR__INVALID_TRANSFER_ACCOUNTS = 0x179a; // 6042
 /** DuplicateTransferEntry: A transfer batch must not contain the same position more than once */
-export const CC_TOKEN_ERROR__DUPLICATE_TRANSFER_ENTRY = 0x1798; // 6040
+export const CC_TOKEN_ERROR__DUPLICATE_TRANSFER_ENTRY = 0x179b; // 6043
 /** InsufficientCollateral: Collateral token balance is insufficient */
-export const CC_TOKEN_ERROR__INSUFFICIENT_COLLATERAL = 0x1799; // 6041
+export const CC_TOKEN_ERROR__INSUFFICIENT_COLLATERAL = 0x179c; // 6044
 /** UnauthorizedResolver: Only the condition resolver may report payouts */
-export const CC_TOKEN_ERROR__UNAUTHORIZED_RESOLVER = 0x179a; // 6042
+export const CC_TOKEN_ERROR__UNAUTHORIZED_RESOLVER = 0x179d; // 6045
 /** ConditionAlreadyResolved: Condition payouts have already been reported */
-export const CC_TOKEN_ERROR__CONDITION_ALREADY_RESOLVED = 0x179b; // 6043
+export const CC_TOKEN_ERROR__CONDITION_ALREADY_RESOLVED = 0x179e; // 6046
 /** ConditionNotResolved: Condition payouts have not been reported */
-export const CC_TOKEN_ERROR__CONDITION_NOT_RESOLVED = 0x179c; // 6044
+export const CC_TOKEN_ERROR__CONDITION_NOT_RESOLVED = 0x179f; // 6047
 /** PayoutNumeratorCountMismatch: Payout numerator count must equal the condition outcome count */
-export const CC_TOKEN_ERROR__PAYOUT_NUMERATOR_COUNT_MISMATCH = 0x179d; // 6045
+export const CC_TOKEN_ERROR__PAYOUT_NUMERATOR_COUNT_MISMATCH = 0x17a0; // 6048
 /** EmptyPayoutChunk: A payout report chunk must contain at least one numerator */
-export const CC_TOKEN_ERROR__EMPTY_PAYOUT_CHUNK = 0x179e; // 6046
+export const CC_TOKEN_ERROR__EMPTY_PAYOUT_CHUNK = 0x17a1; // 6049
 /** PayoutReportTooLong: Payout report contains more numerators than the condition */
-export const CC_TOKEN_ERROR__PAYOUT_REPORT_TOO_LONG = 0x179f; // 6047
+export const CC_TOKEN_ERROR__PAYOUT_REPORT_TOO_LONG = 0x17a2; // 6050
 /** IncompletePayoutReport: Payout report does not contain every condition outcome */
-export const CC_TOKEN_ERROR__INCOMPLETE_PAYOUT_REPORT = 0x17a0; // 6048
+export const CC_TOKEN_ERROR__INCOMPLETE_PAYOUT_REPORT = 0x17a3; // 6051
 /** PayoutReportMismatch: Payout report does not match its condition */
-export const CC_TOKEN_ERROR__PAYOUT_REPORT_MISMATCH = 0x17a1; // 6049
+export const CC_TOKEN_ERROR__PAYOUT_REPORT_MISMATCH = 0x17a4; // 6052
 /** WrapperMismatch: Wrapper configuration does not match its position */
-export const CC_TOKEN_ERROR__WRAPPER_MISMATCH = 0x17a2; // 6050
+export const CC_TOKEN_ERROR__WRAPPER_MISMATCH = 0x17a5; // 6053
 /** WrapperMintMismatch: Wrapper mint is not the canonical mint for its position */
-export const CC_TOKEN_ERROR__WRAPPER_MINT_MISMATCH = 0x17a3; // 6051
+export const CC_TOKEN_ERROR__WRAPPER_MINT_MISMATCH = 0x17a6; // 6054
 
 export type CcTokenError =
   | typeof CC_TOKEN_ERROR__ACCOUNT_NOT_WRITABLE
@@ -148,6 +154,7 @@ export type CcTokenError =
   | typeof CC_TOKEN_ERROR__INVALID_PAYOUT_FRACTION
   | typeof CC_TOKEN_ERROR__INVALID_POSITION_ID
   | typeof CC_TOKEN_ERROR__INVALID_REMAINING_ACCOUNTS
+  | typeof CC_TOKEN_ERROR__INVALID_SCENARIO_NAME
   | typeof CC_TOKEN_ERROR__INVALID_TRANSFER_ACCOUNTS
   | typeof CC_TOKEN_ERROR__INVALID_TRANSFER_DESTINATION
   | typeof CC_TOKEN_ERROR__ISSUER_CONTROLLED_COLLATERAL_NOT_ACCEPTED
@@ -163,9 +170,11 @@ export type CcTokenError =
   | typeof CC_TOKEN_ERROR__POSITION_MISMATCH
   | typeof CC_TOKEN_ERROR__ROOT_COLLATERAL_REQUIRED
   | typeof CC_TOKEN_ERROR__ROOT_POSITION
+  | typeof CC_TOKEN_ERROR__SCENARIO_MISMATCH
   | typeof CC_TOKEN_ERROR__SELF_TRANSFER
   | typeof CC_TOKEN_ERROR__TRANSFER_BATCH_TOO_LARGE
   | typeof CC_TOKEN_ERROR__UNAUTHORIZED_RESOLVER
+  | typeof CC_TOKEN_ERROR__UNAUTHORIZED_SCENARIO_CREATOR
   | typeof CC_TOKEN_ERROR__UNEXPECTED_PARENT_COLLECTION
   | typeof CC_TOKEN_ERROR__UNSUPPORTED_COLLATERAL_EXTENSION
   | typeof CC_TOKEN_ERROR__WRAPPER_MINT_MISMATCH
@@ -204,6 +213,7 @@ if (process.env["NODE_ENV"] !== "production") {
     [CC_TOKEN_ERROR__INVALID_PAYOUT_FRACTION]: `Payout numerator must not exceed its denominator`,
     [CC_TOKEN_ERROR__INVALID_POSITION_ID]: `Position ID does not match its definition`,
     [CC_TOKEN_ERROR__INVALID_REMAINING_ACCOUNTS]: `Remaining accounts must contain one position and balance pair per partition item`,
+    [CC_TOKEN_ERROR__INVALID_SCENARIO_NAME]: `Scenario name must be 1 to 64 UTF-8 bytes without surrounding whitespace or control characters`,
     [CC_TOKEN_ERROR__INVALID_TRANSFER_ACCOUNTS]: `Transfer accounts must contain one position, source and destination per amount`,
     [CC_TOKEN_ERROR__INVALID_TRANSFER_DESTINATION]: `A single transfer requires exactly one destination balance account`,
     [CC_TOKEN_ERROR__ISSUER_CONTROLLED_COLLATERAL_NOT_ACCEPTED]: `Issuer-controlled collateral requires explicit acceptance`,
@@ -219,9 +229,11 @@ if (process.env["NODE_ENV"] !== "production") {
     [CC_TOKEN_ERROR__POSITION_MISMATCH]: `Position account does not match its registered definition`,
     [CC_TOKEN_ERROR__ROOT_COLLATERAL_REQUIRED]: `A root full-partition transition requires a collateral handler`,
     [CC_TOKEN_ERROR__ROOT_POSITION]: `The collateral root does not have a position ID`,
+    [CC_TOKEN_ERROR__SCENARIO_MISMATCH]: `Scenario account does not match its registered definition`,
     [CC_TOKEN_ERROR__SELF_TRANSFER]: `Source and destination owners must differ`,
     [CC_TOKEN_ERROR__TRANSFER_BATCH_TOO_LARGE]: `A transfer batch contains too many positions`,
     [CC_TOKEN_ERROR__UNAUTHORIZED_RESOLVER]: `Only the condition resolver may report payouts`,
+    [CC_TOKEN_ERROR__UNAUTHORIZED_SCENARIO_CREATOR]: `Only the scenario creator may rename it`,
     [CC_TOKEN_ERROR__UNEXPECTED_PARENT_COLLECTION]: `Root collections must not provide a parent account`,
     [CC_TOKEN_ERROR__UNSUPPORTED_COLLATERAL_EXTENSION]: `Collateral mint uses an unsupported Token-2022 extension`,
     [CC_TOKEN_ERROR__WRAPPER_MINT_MISMATCH]: `Wrapper mint is not the canonical mint for its position`,

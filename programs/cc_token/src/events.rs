@@ -36,6 +36,21 @@ pub struct PositionRegistered {
 }
 
 #[event]
+pub struct ScenarioRegistered {
+    pub scenario: Pubkey,
+    pub creator: Pubkey,
+    pub anchor_position_id: [u8; 32],
+    pub name: String,
+}
+
+#[event]
+pub struct ScenarioNameUpdated {
+    pub scenario: Pubkey,
+    pub creator: Pubkey,
+    pub name: String,
+}
+
+#[event]
 pub struct PositionBalanceInitialized {
     pub owner: Pubkey,
     pub position_id: [u8; 32],
