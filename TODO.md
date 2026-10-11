@@ -159,6 +159,6 @@
 - [ ] Implementation-aligned architecture diagram
 - [ ] Public protocol and API documentation
 - [x] Deployment checklist, scripts and initial devnet deployment
-- [ ] Scenario definition devnet upgrade and backfill
+- [x] Scenario definition devnet upgrade and initial backfill
 - [ ] Vercel deployment
 - [ ] IDL deployment
