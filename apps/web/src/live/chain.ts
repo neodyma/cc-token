@@ -1,8 +1,10 @@
 import {
   complementIndexSet,
+  createKitExecutionAdapter,
   deriveCollectionId,
   deriveConditionId,
   derivePositionId,
+  executeConfirmedPlan,
   generatedClient,
   getCollectionAddress,
   getConditionAddress,
@@ -13,6 +15,7 @@ import {
   getMergeRootCollateralInstruction,
   getNativePositionSetupInstructions,
   getPrepareConditionInstruction,
+  getPositionBalanceAddress,
   getRedeemNativePositionInstruction,
   getRedeemNativePositionSetupInstructions,
   getRedeemRootCollateralInstruction,
@@ -31,8 +34,13 @@ import {
   planScenarioAnchor,
   ROOT_COLLECTION_ID,
   validatePartition,
+  WebStoragePlanCheckpointStore,
+  type CcTokenExecutionRpc,
   type ConditionClause,
   type IndexSetWords,
+  type PreparedCcTokenTransaction,
+  type TransactionInstructionPlanStep,
+  type WebStorage,
 } from "@cc-token/sdk";
 import {
   findAssociatedTokenPda,
@@ -70,13 +78,14 @@ import type { ConditionRef } from "../scenario.ts";
 
 // The parts of the Kit client the live page uses. `payer` is the connected wallet.
 export type LiveClient = Readonly<{
-  rpc: Rpc<
-    GetAccountInfoApi &
-      GetMultipleAccountsApi &
-      GetProgramAccountsApi &
-      GetSignaturesForAddressApi &
-      GetTokenAccountsByOwnerApi
-  >;
+  rpc: CcTokenExecutionRpc &
+    Rpc<
+      GetAccountInfoApi &
+        GetMultipleAccountsApi &
+        GetProgramAccountsApi &
+        GetSignaturesForAddressApi &
+        GetTokenAccountsByOwnerApi
+    >;
   payer: TransactionSigner;
   getMinimumBalance: ClientWithGetMinimumBalance["getMinimumBalance"];
   sendTransactions: (input: InstructionPlan) => Promise<TransactionPlanResult>;
@@ -439,7 +448,7 @@ export async function prepareQuestion(
   ]);
 }
 
-async function transition(
+async function transitionInstructions(
   direction: "split" | "merge",
   client: LiveClient,
   collateral: CollateralRef,
@@ -447,7 +456,7 @@ async function transition(
   condition: ConditionRef,
   partition: readonly IndexSetWords[],
   amount: bigint,
-): Promise<readonly Signature[]> {
+): Promise<readonly Instruction[]> {
   const owner = client.payer;
   const { conditionId, outcomeCount } = condition;
   const collateralMint = collateral.mint;
@@ -467,7 +476,7 @@ async function transition(
       acceptIssuerControlled: collateral.issuerControlled,
     };
     if (direction === "merge") {
-      return send(client, [create, await getMergeRootCollateralInstruction(input)]);
+      return [create, await getMergeRootCollateralInstruction(input)];
     }
     const setup = await getRootCollateralSetupInstructions({
       payer: owner,
@@ -477,10 +486,10 @@ async function transition(
       outcomeCount,
       partition,
     });
-    return send(client, [
+    return [
       ...(await withoutExisting(client, setup)),
       await getSplitRootCollateralInstruction(input),
-    ]);
+    ];
   }
 
   const parentCollectionId = collectionIdOf(parent);
@@ -505,12 +514,35 @@ async function transition(
       partition,
     })),
   ];
-  return send(client, [
+  return [
     ...(await withoutExisting(client, setup)),
     direction === "split"
       ? await getSplitNativePositionInstruction(input)
       : await getMergeNativePositionsInstruction(input),
-  ]);
+  ];
+}
+
+async function transition(
+  direction: "split" | "merge",
+  client: LiveClient,
+  collateral: CollateralRef,
+  parent: readonly ConditionClause[],
+  condition: ConditionRef,
+  partition: readonly IndexSetWords[],
+  amount: bigint,
+): Promise<readonly Signature[]> {
+  return send(
+    client,
+    await transitionInstructions(
+      direction,
+      client,
+      collateral,
+      parent,
+      condition,
+      partition,
+      amount,
+    ),
+  );
 }
 
 // `parent` is the position being refined, without the question in `condition`.
@@ -525,29 +557,106 @@ export function split(
   return transition("split", client, collateral, parent, condition, partition, amount);
 }
 
-// Deposits and splits once per question, down to the position `path` names. Each question
-// may appear once. A later split can fail after earlier ones have landed.
+export type TakePositionOptions = Readonly<{
+  operationId: string;
+  storage: WebStorage;
+  checkpointPrefix?: string;
+  onStep?: (completed: number, total: number) => void | Promise<void>;
+}>;
+
+function takePositionPlanId(
+  owner: Address,
+  collateralMint: Address,
+  path: readonly ConditionClause[],
+  amount: bigint,
+  operationId: string,
+): string {
+  return `take-position:${owner}:${collateralMint}:${bytesHex(collectionIdOf(path))}:${amount}:${operationId}`;
+}
+
+function takePositionStepId(depth: number): string {
+  return `factor:${depth}`;
+}
+
+// Deposits and splits once per question, down to the position `path` names. Confirmed steps
+// are reconciled from persistent checkpoints before any transaction is sent again.
 export async function takePosition(
   client: LiveClient,
   collateral: CollateralRef,
   path: readonly ConditionClause[],
   amount: bigint,
+  options: TakePositionOptions,
 ): Promise<readonly Signature[]> {
+  const planId = takePositionPlanId(
+    client.payer.address,
+    collateral.mint,
+    path,
+    amount,
+    options.operationId,
+  );
+  const checkpointStore = new WebStoragePlanCheckpointStore<
+    PreparedCcTokenTransaction,
+    Signature,
+    bigint
+  >(options.storage, options.checkpointPrefix);
   const signatures: Signature[] = [];
   for (let depth = 0; depth < path.length; depth += 1) {
     const { conditionId, outcomeCount, indexSet } = path[depth]!;
-    signatures.push(
-      ...(await split(
-        client,
-        collateral,
-        path.slice(0, depth),
-        { conditionId, outcomeCount },
-        [indexSet, complementIndexSet(outcomeCount, indexSet)],
-        amount,
-      )),
+    const instructions = await transitionInstructions(
+      "split",
+      client,
+      collateral,
+      path.slice(0, depth),
+      { conditionId, outcomeCount },
+      [indexSet, complementIndexSet(outcomeCount, indexSet)],
+      amount,
     );
+    const transitionInstruction = instructions.at(-1);
+    if (!transitionInstruction) throw new Error("a position acquisition step has no instructions");
+    const setup = instructions.slice(0, -1);
+    if (setup.length > 0) signatures.push(...(await send(client, setup)));
+    const step: TransactionInstructionPlanStep = {
+      id: takePositionStepId(depth),
+      planId,
+      kind: "execute",
+      instructions: [transitionInstruction],
+    };
+    const factors = path.slice(0, depth + 1);
+    const adapter = createKitExecutionAdapter({
+      rpc: client.rpc,
+      feePayer: client.payer,
+      checkpointStore,
+      version: 0,
+      async refetch() {
+        const positionId = derivePositionId(collateral.mint, collectionIdOf(factors));
+        const [balance] = await getPositionBalanceAddress(client.payer.address, positionId);
+        const account = await generatedClient.fetchMaybePositionBalance(client.rpc, balance);
+        if (!account.exists) throw new Error("position balance was not found after confirmation");
+        return account.data.amount;
+      },
+    });
+    const [receipt] = await executeConfirmedPlan([step], adapter);
+    if (!receipt) throw new Error("position acquisition step did not produce a receipt");
+    signatures.push(receipt.signature);
+    await options.onStep?.(depth + 1, path.length);
   }
   return signatures;
+}
+
+export async function clearTakePositionCheckpoints(
+  owner: Address,
+  collateralMint: Address,
+  path: readonly ConditionClause[],
+  amount: bigint,
+  options: Pick<TakePositionOptions, "operationId" | "storage" | "checkpointPrefix">,
+): Promise<void> {
+  const store = new WebStoragePlanCheckpointStore(options.storage, options.checkpointPrefix);
+  const planId = takePositionPlanId(owner, collateralMint, path, amount, options.operationId);
+  await Promise.all(path.map((_, depth) => store.remove(planId, takePositionStepId(depth))));
+}
+
+function bytesHex(bytes: ReadonlyUint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function merge(

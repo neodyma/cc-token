@@ -21,7 +21,8 @@ ordinary permissionless instructions.
 | Artifact SHA-256       | `48afcf7d7a43d98a624d195e6e23b1107b3b7d7d7ea6c95d3ab9f16926867ce3`                                                                                         |
 
 The machine-readable record is [deployments/devnet.json](../deployments/devnet.json). The SDK
-exports this program address as `CC_TOKEN_PROGRAM_ADDRESS`.
+exports this program address as `CC_TOKEN_PROGRAM_ADDRESS`. The matching Anchor IDL is published
+on devnet for clients that retrieve interface metadata from the program address.
 
 The first published scenario is [`SOL/USD at expiry`](https://explorer.solana.com/address/683qKaLibTNbXXVNYshVtPk18uTC2L7qFD6TASKv21YU?cluster=devnet), registered at slot `509874786` against anchor position `6c7a70be1f5e0ce01747cc996527d5632e58f54544eb4befcfce4557cdae960d`. Its registration transaction is [`37edC4…QgQxKC`](https://explorer.solana.com/tx/37edC4Un8nYNSWo17KmQYrCbCQPnHbJKAK49wjLgH13Sirw9QYCNNYDdavZvfCHhjgej741sMZizJfyZqUQgQxKC?cluster=devnet).
 

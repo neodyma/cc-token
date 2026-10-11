@@ -21,6 +21,7 @@ import {
 } from "./Inspector.tsx";
 import { balanceOf, COLLATERAL_KEY, layoutGraph, withPositionPath } from "./ledger.ts";
 import {
+  clearTakePositionCheckpoints,
   findOwnScenario,
   merge,
   mintTestCollateral,
@@ -68,6 +69,7 @@ import {
   findCondition,
   formatTokenAmount,
   holdingKey,
+  MAX_U64,
   outcomesInIndexSet,
   parseTokenAmount,
   partitionSource,
@@ -119,6 +121,28 @@ export function transactionLinks(signatures: readonly Signature[]) {
 
 function shorten(value: string): string {
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
+}
+
+type PendingAcquisition = Readonly<{ operationId: string; amount: string }>;
+
+function loadPendingAcquisition(key: string | null): PendingAcquisition | null {
+  if (key === null) return null;
+  const stored = localStorage.getItem(key);
+  if (stored === null) return null;
+  const parsed = attempt(() => JSON.parse(stored) as unknown);
+  if (!parsed.ok || typeof parsed.value !== "object" || parsed.value === null) return null;
+  const value = parsed.value as Record<string, unknown>;
+  const amountText = String(value.amount);
+  const amount = attempt(() => BigInt(amountText));
+  return typeof value.operationId === "string" &&
+    value.operationId.length > 0 &&
+    value.operationId.length <= 128 &&
+    /^\d+$/.test(amountText) &&
+    amount.ok &&
+    amount.value > 0n &&
+    amount.value <= MAX_U64
+    ? { operationId: value.operationId, amount: amountText }
+    : null;
 }
 
 // A published scenario the workspace was opened for: its collateral token and the featured
@@ -437,6 +461,8 @@ function ScenarioBanner(props: {
   held: bigint;
   mintable: boolean;
   busy: boolean;
+  pendingAmount: bigint | null;
+  completedSteps: number;
   onTake: (amount: bigint) => void;
   onFail: (message: string) => void;
 }) {
@@ -482,7 +508,25 @@ function ScenarioBanner(props: {
           </span>
         )}
       </div>
-      {free === 0n && props.held > 0n ? null : free === 0n ? (
+      {props.pendingAmount !== null ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <p className="mr-auto text-muted">
+            Resume the {formatTokenAmount(props.pendingAmount, decimals)} {props.symbol} deposit.
+            Confirmed splits are checked before another transaction is sent.
+            {props.completedSteps > 0
+              ? ` ${props.completedSteps} of ${props.legs.length} steps confirmed.`
+              : ""}
+          </p>
+          <button
+            type="button"
+            disabled={props.busy}
+            onClick={() => props.onTake(props.pendingAmount!)}
+            className="rounded-md bg-accent px-3 py-1.5 font-medium text-panel disabled:opacity-40"
+          >
+            Resume position
+          </button>
+        </div>
+      ) : free === 0n && props.held > 0n ? null : free === 0n ? (
         <p className="mt-2 text-muted">
           You have no {props.symbol} to deposit.{" "}
           {props.mintable
@@ -516,13 +560,10 @@ function ScenarioBanner(props: {
             </button>
           </fieldset>
           <p className="mt-2 text-xs text-muted">
-            You get one share of it for each {props.symbol} deposited, in{" "}
-            {props.legs.length === 1
-              ? "one transaction"
-              : `${props.legs.length} transactions, one per question`}
-            . The same number of shares on the other results comes with it and stays in your graph,
-            to send, wrap or merge back. To pick other results yourself, use the split button under
-            your wallet.
+            You get one share of it for each {props.symbol} deposited, with one confirmed split per
+            question. New position accounts can require additional setup approvals. The same number
+            of shares on the other results comes with it and stays in your graph, to send, wrap or
+            merge back. To pick other results yourself, use the split button under your wallet.
           </p>
         </>
       )}
@@ -690,11 +731,50 @@ function Workspace(props: {
     )
       ? scenario.path
       : null;
+  const acquisitionKey =
+    scenario === undefined
+      ? null
+      : `${STORAGE}:${owner}:take:${collateral.mint}:${holdingKey(scenario.path)}`;
+  const checkpointPrefix = `${STORAGE}:take-checkpoint:`;
+  const [pendingAcquisition, setPendingAcquisition] = useState<PendingAcquisition | null>(() =>
+    loadPendingAcquisition(acquisitionKey),
+  );
+  const [completedAcquisitionSteps, setCompletedAcquisitionSteps] = useState(0);
   function takeFeatured(path: readonly ConditionClause[], amount: bigint) {
+    if (acquisitionKey === null) return;
+    const pending = pendingAcquisition ?? {
+      operationId: crypto.randomUUID(),
+      amount: amount.toString(),
+    };
+    if (pendingAcquisition === null) {
+      const stored = attempt(() => localStorage.setItem(acquisitionKey, JSON.stringify(pending)));
+      if (!stored.ok) {
+        props.onFail("This browser could not save the acquisition before it starts.");
+        return;
+      }
+      setPendingAcquisition(pending);
+    }
+    const deposit = BigInt(pending.amount);
     void props.onRun(
       "Taking the position",
-      `Deposited ${tokens(amount)} and split it down to ${nameOf(path)}.`,
-      () => takePosition(client, collateral, path, amount),
+      `Deposited ${tokens(deposit)} and split it down to ${nameOf(path)}.`,
+      async () => {
+        const signatures = await takePosition(client, collateral, path, deposit, {
+          operationId: pending.operationId,
+          storage: localStorage,
+          checkpointPrefix,
+          onStep: (completed) => setCompletedAcquisitionSteps(completed),
+        });
+        localStorage.removeItem(acquisitionKey);
+        setPendingAcquisition(null);
+        setCompletedAcquisitionSteps(0);
+        await clearTakePositionCheckpoints(owner, collateral.mint, path, deposit, {
+          operationId: pending.operationId,
+          storage: localStorage,
+          checkpointPrefix,
+        });
+        return signatures;
+      },
     );
     props.onSelect({ kind: "position", key: holdingKey(path) });
   }
@@ -996,6 +1076,8 @@ function Workspace(props: {
             }
             mintable={collateral.mintable}
             busy={props.busy !== null}
+            pendingAmount={pendingAcquisition === null ? null : BigInt(pendingAcquisition.amount)}
+            completedSteps={completedAcquisitionSteps}
             onTake={(amount) => takeFeatured(featuredPath, amount)}
             onFail={props.onFail}
           />
