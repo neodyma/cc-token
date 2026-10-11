@@ -91,7 +91,7 @@ export async function fetchVerifiedPositionDefinition(
     "invalid_identity",
     "fetched position does not match the requested ID",
   );
-  await verifyPositionIdentity(position);
+  await verifyPositionDefinitionAccount(position);
   return position;
 }
 
@@ -100,7 +100,7 @@ export async function verifyPositionAccount(
   collateral: VerifiedCollateral,
   collection: VerifiedCollection,
 ): Promise<Account<PositionDefinition>> {
-  await verifyPositionIdentity(position);
+  await verifyPositionDefinitionAccount(position);
   if (position.data.collateralMint !== collateral.config.data.mint) {
     throw new DefinitionVerificationError(
       "invalid_witness",
@@ -220,7 +220,7 @@ export async function getClosePositionBalanceInstruction(input: {
   return getCloseBalanceInstruction({ owner: input.owner, position, balance });
 }
 
-async function verifyPositionIdentity(
+export async function verifyPositionDefinitionAccount(
   position: Account<PositionDefinition>,
 ): Promise<Account<PositionDefinition>> {
   verifyProgramAccount(position, "position definition");

@@ -33,5 +33,6 @@ export type {
   PayoutReport,
   PositionBalance,
   PositionDefinition,
+  ScenarioDefinition,
   WrapperConfig,
 } from "./generated/index.ts";

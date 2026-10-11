@@ -3,6 +3,7 @@ import {
   ConditionStatus,
   generatedClient,
   getCollateralAddress,
+  fetchCanonicalWrapperConfigs,
   getCollectionAddress,
   getConditionAddress,
   getPositionAddress,
@@ -215,36 +216,32 @@ async function fetchWrapped(
 ): Promise<
   ReadonlyMap<string, Readonly<{ positionId: Uint8Array; mint: Address; amount: bigint }>>
 > {
-  const accounts = await rpc
-    .getTokenAccountsByOwner(
-      owner,
-      { programId: TOKEN_2022_PROGRAM_ADDRESS },
-      { encoding: "jsonParsed", ...config },
-    )
-    .send();
+  const [accounts, wrappers] = await Promise.all([
+    rpc
+      .getTokenAccountsByOwner(
+        owner,
+        { programId: TOKEN_2022_PROGRAM_ADDRESS },
+        { encoding: "jsonParsed", ...config },
+      )
+      .send(),
+    fetchCanonicalWrapperConfigs(rpc, config),
+  ]);
+  const wrappersByMint = new Map(wrappers.map((wrapper) => [wrapper.data.mint, wrapper]));
   const amounts = new Map<Address, bigint>();
   for (const { account } of accounts.value) {
     const { mint, tokenAmount } = account.data.parsed.info;
+    if (!wrappersByMint.has(mint)) continue;
     amounts.set(mint, (amounts.get(mint) ?? 0n) + BigInt(tokenAmount.amount));
   }
 
-  // A wrapper mint's authority is its wrapper config, which names the position.
+  // Unrelated Token-2022 mints were discarded before this mint-account read.
   const mints = await fetchAllMaybeMint(rpc, [...amounts.keys()], config);
-  const candidates = mints.flatMap((mint) =>
-    mint.exists && isSome(mint.data.mintAuthority)
-      ? [{ mint: mint.address, wrapper: mint.data.mintAuthority.value }]
-      : [],
-  );
-  const wrappers = await generatedClient.fetchAllMaybeWrapperConfig(
-    rpc,
-    candidates.map((candidate) => candidate.wrapper),
-    config,
-  );
   const wrapped = new Map<string, { positionId: Uint8Array; mint: Address; amount: bigint }>();
-  for (let index = 0; index < candidates.length; index += 1) {
-    const wrapper = wrappers[index]!;
-    const { mint } = candidates[index]!;
-    if (!wrapper.exists || wrapper.programAddress !== CC_TOKEN_PROGRAM_ADDRESS) continue;
+  for (const mintAccount of mints) {
+    if (!mintAccount.exists || !isSome(mintAccount.data.mintAuthority)) continue;
+    const mint = mintAccount.address;
+    const wrapper = wrappersByMint.get(mint);
+    if (!wrapper || mintAccount.data.mintAuthority.value !== wrapper.address) continue;
     const positionId = Uint8Array.from(wrapper.data.positionId);
     const [[wrapperAddress], [canonicalMint]] = await Promise.all([
       getWrapperAddress(positionId),

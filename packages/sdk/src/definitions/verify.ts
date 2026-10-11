@@ -268,7 +268,7 @@ export async function fetchVerifiedCollection(
   return buildVerifiedCollection(collectionId, leafToRoot);
 }
 
-function buildVerifiedCollection(
+export function buildVerifiedCollection(
   collectionId: ReadonlyUint8Array,
   leafToRoot: readonly VerifiedCollectionWitness[],
 ): VerifiedCollection {

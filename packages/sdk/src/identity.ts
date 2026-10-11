@@ -19,6 +19,7 @@ const PAYOUT_REPORT_SEED = new TextEncoder().encode("payout_report");
 const COLLATERAL_SEED = new TextEncoder().encode("collateral");
 const VAULT_SEED = new TextEncoder().encode("vault");
 const POSITION_SEED = new TextEncoder().encode("position");
+const SCENARIO_SEED = new TextEncoder().encode("scenario");
 const BALANCE_SEED = new TextEncoder().encode("balance");
 const WRAPPER_SEED = new TextEncoder().encode("wrapper");
 const WRAPPER_MINT_SEED = new TextEncoder().encode("wrapper_mint");
@@ -141,6 +142,17 @@ export function getPositionAddress(positionId: ReadonlyUint8Array): Promise<Prog
   return getProgramDerivedAddress({
     programAddress: CC_TOKEN_PROGRAM_ADDRESS,
     seeds: [POSITION_SEED, positionId],
+  });
+}
+
+export function getScenarioAddress(
+  creator: Address,
+  anchorPositionId: ReadonlyUint8Array,
+): Promise<ProgramDerivedAddress> {
+  assertIdentifier(anchorPositionId, "anchorPositionId");
+  return getProgramDerivedAddress({
+    programAddress: CC_TOKEN_PROGRAM_ADDRESS,
+    seeds: [SCENARIO_SEED, getAddressEncoder().encode(creator), anchorPositionId],
   });
 }
 
