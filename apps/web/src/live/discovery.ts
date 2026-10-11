@@ -27,6 +27,7 @@ import {
   isSolanaError,
   isSome,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
   type Address,
   type Base58EncodedBytes,
   type ReadonlyUint8Array,
@@ -99,6 +100,28 @@ export async function whenCaughtUp<T>(read: () => Promise<T>, attempts = 20): Pr
         throw error;
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+}
+
+// Repeats a read that a busy endpoint turned away, waiting longer each time.
+export async function whenAllowed<T>(
+  read: () => Promise<T>,
+  attempts = 4,
+  delay = 1000,
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await read();
+    } catch (error) {
+      if (
+        attempt >= attempts ||
+        !isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) ||
+        error.context.statusCode !== 429
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay * 2 ** (attempt - 1)));
     }
   }
 }
@@ -381,7 +404,8 @@ export async function fetchHeldCollaterals(
 }
 
 // The wording of a question, read from the memo of the transaction that prepared it and
-// checked against the question ID. Null when no memo was published or none matches.
+// checked against the question ID. Null when no memo was published or none matches; it
+// throws when the history could not be read, which is worth trying again.
 export async function recoverQuestion(
   rpc: LiveRpc,
   condition: ChainCondition,
@@ -390,9 +414,9 @@ export async function recoverQuestion(
   let before: Signature | undefined;
   // Newest first, so the preparing transaction is on the last page. Busy questions are capped.
   for (let page = 0; page < 5; page += 1) {
-    const signatures = await rpc
-      .getSignaturesForAddress(address, { limit: 1000, ...(before ? { before } : {}) })
-      .send();
+    const signatures = await whenAllowed(() =>
+      rpc.getSignaturesForAddress(address, { limit: 1000, ...(before ? { before } : {}) }).send(),
+    );
     for (const { memo } of signatures) {
       const question = memo === null ? null : questionFromMemo(memo, condition);
       if (question) return question;

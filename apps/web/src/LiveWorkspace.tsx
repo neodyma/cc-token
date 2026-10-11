@@ -160,6 +160,8 @@ export function LiveWorkspace(props: { owner: Address }) {
   const sentSlot = useRef<Slot | undefined>(undefined);
   // Questions whose published wording has already been looked for.
   const sought = useRef(new Set<string>());
+  // How many questions on screen could not be looked up, so their wording may yet exist.
+  const [unread, setUnread] = useState(0);
   async function noteSent(signatures: readonly Signature[]) {
     if (signatures.length === 0) return;
     const statuses = await client.rpc.getSignatureStatuses([...signatures]).send();
@@ -198,14 +200,21 @@ export function LiveWorkspace(props: { owner: Address }) {
       const unnamed = [...state.conditions].filter(
         ([key]) => !named.has(key) && !sought.current.has(key),
       );
-      if (unnamed.length === 0) return;
-      const recovered = await Promise.all(
-        unnamed.map(([key, condition]) => {
-          sought.current.add(key);
-          return recoverQuestion(client.rpc, condition).catch(() => null);
-        }),
-      );
-      const found = recovered.filter((question) => question !== null);
+      // One at a time, to stay within what the public endpoint allows. A lookup that failed
+      // is not counted as done, so the next refresh tries it again.
+      const found: StoredQuestion[] = [];
+      let failed = 0;
+      for (const [key, condition] of unnamed) {
+        sought.current.add(key);
+        try {
+          const question = await recoverQuestion(client.rpc, condition);
+          if (question) found.push(question);
+        } catch {
+          sought.current.delete(key);
+          failed += 1;
+        }
+      }
+      setUnread(failed);
       if (found.length === 0) return;
       questions.current = [...questions.current, ...found];
       saveQuestions(localStorage, questionsKey, questions.current);
@@ -337,6 +346,13 @@ export function LiveWorkspace(props: { owner: Address }) {
         <>
           {failure}
           {!chain.wrappedChecked && <WrappedUnchecked />}
+          {unread > 0 && (
+            <p className="rounded-md bg-bad-soft px-3 py-2 text-sm text-bad">
+              Could not read the published wording of{" "}
+              {unread === 1 ? "a question" : "some questions"}, so{" "}
+              {unread === 1 ? "it shows" : "they show"} placeholder names. Refresh to try again.
+            </p>
+          )}
         </>
       }
       history={history}

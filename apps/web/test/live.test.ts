@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { deriveConditionId, type ConditionClause } from "@cc-token/sdk";
-import { getAddressDecoder } from "@solana/kit";
+import {
+  getAddressDecoder,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
+  SolanaError,
+} from "@solana/kit";
 
 import { COLLATERAL_KEY, layoutGraph } from "../src/ledger.ts";
 import { getNameTokenInstruction, inBatches, TEST_TOKEN_NAME } from "../src/live/chain.ts";
-import { decodeTokenLabel, ledgerFromPositions } from "../src/live/discovery.ts";
+import { decodeTokenLabel, ledgerFromPositions, whenAllowed } from "../src/live/discovery.ts";
 import {
   loadQuestions,
   newQuestion,
@@ -171,6 +175,29 @@ test("long account lists are read at most 100 at a time, in order", async () => 
     addresses.map((address) => address * 2),
   );
   assert.deepEqual(await inBatches([], async () => assert.fail("nothing to read")), []);
+});
+
+test("a read turned away by a busy endpoint is repeated, other failures are not", async () => {
+  const refused = (statusCode: number) =>
+    new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+      headers: new Headers(),
+      message: "refused",
+      statusCode,
+    });
+  let reads = 0;
+  const read = (failures: number, statusCode: number) => async () => {
+    reads += 1;
+    if (reads <= failures) throw refused(statusCode);
+    return "wording";
+  };
+  assert.equal(await whenAllowed(read(2, 429), 4, 0), "wording");
+  assert.equal(reads, 3);
+  reads = 0;
+  await assert.rejects(whenAllowed(read(4, 429), 4, 0));
+  assert.equal(reads, 4);
+  reads = 0;
+  await assert.rejects(whenAllowed(read(1, 500), 4, 0));
+  assert.equal(reads, 1);
 });
 
 test("a token's name is read from its metadata account and tied to its mint", () => {
