@@ -19,7 +19,7 @@ import {
   type Actions,
   type Resolutions,
 } from "./Inspector.tsx";
-import { balanceOf, COLLATERAL_KEY, layoutGraph } from "./ledger.ts";
+import { balanceOf, COLLATERAL_KEY, layoutGraph, withPositionPath } from "./ledger.ts";
 import {
   findOwnScenario,
   merge,
@@ -616,10 +616,10 @@ function Workspace(props: {
       ),
     [chain.conditions],
   );
-  const ledger = useMemo(
-    () => ledgerFromPositions(collateral.free, chain.positions),
-    [collateral.free, chain.positions],
-  );
+  const ledger = useMemo(() => {
+    const held = ledgerFromPositions(collateral.free, chain.positions);
+    return scenario ? withPositionPath(held, scenario.path) : held;
+  }, [collateral.free, chain.positions, scenario]);
   const layout = useMemo(() => layoutGraph(ledger), [ledger]);
   const wrapped = useMemo(
     () =>

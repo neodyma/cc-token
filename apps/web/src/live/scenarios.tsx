@@ -2,6 +2,7 @@ import {
   classifyScenarioParticipation,
   fetchAllVerifiedScenarios,
   fetchVerifiedScenario,
+  type ConditionClause,
   type ScenarioParticipation,
   type VerifiedScenario,
 } from "@cc-token/sdk";
@@ -10,9 +11,11 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Panel } from "../components.tsx";
 import { describeError } from "../errors.ts";
+import { COLLATERAL_KEY, layoutGraph, withPositionPath } from "../ledger.ts";
 import type { ScenarioEntry } from "../LiveWorkspace.tsx";
+import { PositionGraph, type GraphNode } from "../PositionGraph.tsx";
 import { liveScenarioRoute, ROUTES } from "../routes.ts";
-import { toHex } from "../scenario.ts";
+import { boxLabel, toHex, type DemoCondition } from "../scenario.ts";
 import { client } from "../solana.ts";
 import { renameScenario } from "./chain.ts";
 import {
@@ -199,8 +202,8 @@ export function LiveScenarioDiscovery(props: { owner?: Address }) {
   );
 }
 
-// With a wallet, `workspace` draws the scenario as a graph to act on. Without one, the
-// featured position is listed as text.
+// With a wallet, `workspace` draws the scenario as a graph to act on. Without one, the same
+// path is still visible as a read-only graph.
 export function LiveScenarioDetail(props: {
   addressText: string;
   owner?: Address;
@@ -409,25 +412,7 @@ export function LiveScenarioDetail(props: {
           title="Featured claim path"
           hint="The anchor names one complete path through the scenario. Other compatible claims are derived from the same condition basis when needed."
         >
-          <ol className="flex flex-col gap-3">
-            {scenario.anchor.collection.factors.map((factor, index) => {
-              const question = names.get(toHex(factor.conditionId));
-              const selected = selectedOutcomes(factor.indexSet, factor.outcomeCount).map(
-                (outcome) => question?.outcomes[outcome] ?? `Outcome ${outcome + 1}`,
-              );
-              return (
-                <li
-                  key={`${toHex(factor.conditionId)}:${index}`}
-                  className="rounded-lg border border-line p-3"
-                >
-                  <p className="font-medium">
-                    {question?.title ?? `Question ${shorten(toHex(factor.conditionId))}`}
-                  </p>
-                  <p className="mt-1 text-sm text-muted">{selected.join(" or ")}</p>
-                </li>
-              );
-            })}
-          </ol>
+          <ScenarioPreview scenario={scenario} label={label} names={names} />
           <div className="mt-4 flex flex-wrap gap-4 text-sm">
             <a href={ROUTES.live} className="text-accent underline">
               Back to scenarios
@@ -441,6 +426,76 @@ export function LiveScenarioDetail(props: {
         </Panel>
       )}
     </div>
+  );
+}
+
+function ScenarioPreview(props: {
+  scenario: VerifiedScenario;
+  label: TokenLabel | null;
+  names: ReadonlyMap<string, Readonly<{ title: string; outcomes: readonly string[] }>>;
+}) {
+  const factors: ConditionClause[] = props.scenario.anchor.collection.factors.map(
+    ({ conditionId, outcomeCount, indexSet }) => ({
+      conditionId: Uint8Array.from(conditionId),
+      outcomeCount,
+      indexSet,
+    }),
+  );
+  const conditions: DemoCondition[] = [
+    ...new Map(
+      props.scenario.anchor.collection.factors.map(({ conditionId, condition }) => {
+        const key = toHex(conditionId);
+        const named = props.names.get(key);
+        const title = named?.title ?? `Question ${shorten(key)}`;
+        return [
+          key,
+          {
+            key,
+            title,
+            question: title,
+            outcomes:
+              named?.outcomes ??
+              Array.from(
+                { length: condition.data.outcomeCount },
+                (_, index) => `Outcome ${index + 1}`,
+              ),
+            resolver: condition.data.resolver,
+            questionId: Uint8Array.from(condition.data.questionId),
+            conditionId: Uint8Array.from(conditionId),
+          },
+        ] as const;
+      }),
+    ).values(),
+  ];
+  const ledger = withPositionPath(
+    { portfolio: { collateral: 0n, holdings: [] }, nodes: [], edges: [] },
+    factors,
+  );
+  const symbol = props.label?.symbol || props.label?.name || "collateral";
+  const nodes: GraphNode[] = [
+    {
+      key: COLLATERAL_KEY,
+      context: "Collateral",
+      title: symbol,
+      amount: "",
+      empty: true,
+    },
+    ...ledger.nodes.map((node) => ({
+      key: node.key,
+      ...boxLabel(conditions, node.factors),
+      amount: "0 shares",
+      empty: true,
+    })),
+  ];
+  return (
+    <PositionGraph
+      nodes={nodes}
+      edges={ledger.edges}
+      layout={layoutGraph(ledger)}
+      selectedKey=""
+      toolbar={null}
+      onSelect={() => {}}
+    />
   );
 }
 
@@ -507,12 +562,6 @@ function compareRows(left: ScenarioRow, right: ScenarioRow): number {
   );
   return (
     slotOrder || left.scenario.definition.address.localeCompare(right.scenario.definition.address)
-  );
-}
-
-function selectedOutcomes(words: readonly bigint[], outcomeCount: number): readonly number[] {
-  return Array.from({ length: outcomeCount }, (_, outcome) => outcome).filter(
-    (outcome) => (words[Math.floor(outcome / 64)]! & (1n << BigInt(outcome % 64))) !== 0n,
   );
 }
 

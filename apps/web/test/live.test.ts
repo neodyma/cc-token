@@ -9,7 +9,7 @@ import {
 } from "@solana/kit";
 
 import { describeError } from "../src/errors.ts";
-import { COLLATERAL_KEY, layoutGraph } from "../src/ledger.ts";
+import { COLLATERAL_KEY, layoutGraph, withPositionPath } from "../src/ledger.ts";
 import {
   getNameTokenInstruction,
   inBatches,
@@ -17,7 +17,12 @@ import {
   tokenLabelProblem,
 } from "../src/live/chain.ts";
 import { createPacer, pacedRpc } from "../src/live/pacing.ts";
-import { decodeTokenLabel, ledgerFromPositions, whenAllowed } from "../src/live/discovery.ts";
+import {
+  decodeTokenLabel,
+  ledgerFromPositions,
+  positionsForScenario,
+  whenAllowed,
+} from "../src/live/discovery.ts";
 import {
   loadQuestions,
   newQuestion,
@@ -33,6 +38,7 @@ import { liveScenarioRoute, scenarioAddressFromRoute } from "../src/routes.ts";
 const resolver = getAddressDecoder().decode(new Uint8Array(32).fill(5));
 const weather = toCondition(newQuestion(resolver, "Weather", ["sun", "rain", "snow"], "salt"));
 const launch = toCondition(newQuestion(resolver, "Launch", ["on time", "late"], "salt"));
+const vote = toCondition(newQuestion(resolver, "ETF vote", ["approved", "rejected"], "salt"));
 
 test("HTTP rate limits are described without hiding the status", () => {
   const error = new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
@@ -172,6 +178,42 @@ test("a position held only as wrapped tokens stays on the graph", () => {
   );
   // Only native shares can be split, merged or redeemed.
   assert.equal(ledger.portfolio.holdings.length, 0);
+});
+
+test("a scenario path stays visible without materialized balances", () => {
+  const sun = on(weather, [0]);
+  const onTime = on(launch, [0]);
+  const empty = ledgerFromPositions(0n, []);
+  const ledger = withPositionPath(empty, [sun, onTime]);
+
+  assert.ok(ledger.nodes.some((node) => node.key === holdingKey([sun])));
+  assert.ok(ledger.nodes.some((node) => node.key === holdingKey([on(weather, [1, 2])])));
+  assert.ok(ledger.nodes.some((node) => node.key === holdingKey([sun, onTime])));
+  assert.ok(ledger.nodes.some((node) => node.key === holdingKey([sun, on(launch, [1])])));
+  assert.equal(ledger.portfolio.holdings.length, 0);
+});
+
+test("scenario graphs include only positions from their condition basis", () => {
+  const sol = on(weather, [0]);
+  const onTime = on(launch, [0]);
+  const approved = on(vote, [0]);
+  const shared = { factors: [sol], amount: 1n, wrapped: 0n, wrapperMint: null };
+  const launchOnly = {
+    factors: [sol, onTime],
+    amount: 1n,
+    wrapped: 0n,
+    wrapperMint: null,
+  };
+  const voteOnly = {
+    factors: [sol, approved],
+    amount: 1n,
+    wrapped: 0n,
+    wrapperMint: null,
+  };
+  const positions = [shared, launchOnly, voteOnly];
+
+  assert.deepEqual(positionsForScenario([sol, onTime], positions), [shared, launchOnly]);
+  assert.deepEqual(positionsForScenario([sol, approved], positions), [shared, voteOnly]);
 });
 
 test("the narrowest containing position is the source", () => {
