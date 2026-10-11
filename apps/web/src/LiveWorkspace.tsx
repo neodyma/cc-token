@@ -43,6 +43,7 @@ import {
   fetchHeldCollaterals,
   fetchPositions,
   ledgerFromPositions,
+  positionsForScenario,
   recoverQuestion,
   whenCaughtUp,
   type ChainCondition,
@@ -184,10 +185,18 @@ export function LiveWorkspace(props: {
             config,
           ),
         ]);
+        const positions = scenario
+          ? positionsForScenario(scenario.path, found.positions)
+          : found.positions;
+        const basis = scenario
+          ? new Set(scenario.path.map((factor) => toHex(factor.conditionId)))
+          : null;
         return {
           collateral,
-          positions: found.positions,
-          conditions: new Map([...known, ...found.conditions]),
+          positions,
+          conditions: new Map(
+            [...known, ...found.conditions].filter(([key]) => basis === null || basis.has(key)),
+          ),
           wrappedChecked: found.wrappedChecked,
         };
       });

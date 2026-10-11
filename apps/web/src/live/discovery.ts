@@ -1,6 +1,7 @@
 import {
   CC_TOKEN_PROGRAM_ADDRESS,
   ConditionStatus,
+  classifyScenarioFactors,
   generatedClient,
   getCollateralAddress,
   fetchCanonicalWrapperConfigs,
@@ -83,6 +84,17 @@ export type LivePosition = Readonly<{
   // Known once the owner has a token account for the wrapper.
   wrapperMint: Address | null;
 }>;
+
+// A scenario is a condition basis, not an exclusive history. A position belongs in its graph
+// when its condition multiset is a non-empty subset of that basis, regardless of its masks.
+export function positionsForScenario(
+  scenarioFactors: readonly Pick<ConditionClause, "conditionId">[],
+  positions: readonly LivePosition[],
+): readonly LivePosition[] {
+  return positions.filter(
+    (position) => classifyScenarioFactors(scenarioFactors, position.factors) !== "unrelated",
+  );
+}
 
 // PositionBalance: discriminator (8), version (1), owner (32), position ID (32), amount (8), bump.
 const BALANCE_SIZE = 82n;

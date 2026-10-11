@@ -312,8 +312,15 @@ export function classifyScenarioParticipation(
   }>,
 ): ScenarioParticipation {
   if (position.collateralMint !== scenario.anchor.position.data.collateralMint) return "unrelated";
-  const scenarioBasis = conditionMultiset(scenario.anchor.collection.factors);
-  const positionBasis = conditionMultiset(position.factors);
+  return classifyScenarioFactors(scenario.anchor.collection.factors, position.factors);
+}
+
+export function classifyScenarioFactors(
+  scenarioFactors: readonly Pick<ConditionClause, "conditionId">[],
+  positionFactors: readonly Pick<ConditionClause, "conditionId">[],
+): ScenarioParticipation {
+  const scenarioBasis = conditionMultiset(scenarioFactors);
+  const positionBasis = conditionMultiset(positionFactors);
   if (positionBasis.size === 0) return "unrelated";
   for (const [conditionId, count] of positionBasis) {
     if ((scenarioBasis.get(conditionId) ?? 0) < count) return "unrelated";

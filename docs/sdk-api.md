@@ -60,7 +60,8 @@ the reusable setup list so clients can submit it last.
 `classifyScenarioParticipation` compares authenticated collateral and condition-ID multisets.
 `exact` positions contain the complete scenario basis, `compatible` positions contain a nonempty
 proper submultiset, and `unrelated` positions match neither. Subset masks select claims and do not
-claim historical provenance.
+claim historical provenance. `classifyScenarioFactors` applies the same multiset comparison when
+the caller has already established the shared collateral domain.
 
 `fetchCanonicalWrapperConfigs` lets wallet discovery intersect Token-2022 accounts with canonical
 program wrappers before reading mint accounts. Unrelated wallet tokens therefore do not create one

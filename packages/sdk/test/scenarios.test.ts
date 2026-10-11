@@ -5,6 +5,7 @@ import { address, generateKeyPairSigner, lamports, type Account, type Address } 
 
 import {
   CC_TOKEN_PROGRAM_ADDRESS,
+  classifyScenarioFactors,
   classifyScenarioParticipation,
   derivePositionId,
   getScenarioAddress,
@@ -108,4 +109,25 @@ test("classifies exact and compatible participation with multiplicity", () => {
   assert.equal(classify(collateralMint, [factor(1), factor(1), factor(1)]), "unrelated");
   assert.equal(classify(creator, [factor(1)]), "unrelated");
   assert.equal(classify(collateralMint, []), "unrelated");
+});
+
+test("one position can participate in multiple scenario bases", () => {
+  const solAboveTwoHundred = factor(1);
+  const fedCuts = factor(2);
+  const etfApproved = factor(3);
+  const btcAboveOneHundredThousand = factor(4);
+
+  const ratesScenario = [solAboveTwoHundred, fedCuts];
+  const etfScenario = [solAboveTwoHundred, etfApproved];
+  assert.equal(classifyScenarioFactors(ratesScenario, [solAboveTwoHundred]), "compatible");
+  assert.equal(classifyScenarioFactors(etfScenario, [solAboveTwoHundred]), "compatible");
+  assert.equal(classifyScenarioFactors(ratesScenario, ratesScenario), "exact");
+  assert.equal(classifyScenarioFactors(etfScenario, ratesScenario), "unrelated");
+  assert.equal(classifyScenarioFactors(ratesScenario, [btcAboveOneHundredThousand]), "unrelated");
+
+  const alternateMasks = ratesScenario.map((clause) => ({
+    ...clause,
+    indexSet: [2n, 0n, 0n, 0n] as const,
+  }));
+  assert.equal(classifyScenarioFactors(ratesScenario, alternateMasks), "exact");
 });
