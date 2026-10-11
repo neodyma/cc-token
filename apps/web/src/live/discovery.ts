@@ -28,6 +28,7 @@ import {
   isSolanaError,
   isSome,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
   type Address,
   type Base58EncodedBytes,
   type ReadonlyUint8Array,
@@ -39,6 +40,7 @@ import { COLLATERAL_KEY, type Edge, type Ledger, type PositionNode } from "../le
 import { holdingKey, toHex, type Holding } from "../scenario.ts";
 import {
   getMetadataAddress,
+  inBatches,
   METADATA_PROGRAM_ADDRESS,
   type CollateralRef,
   type LiveClient,
@@ -103,6 +105,28 @@ export async function whenCaughtUp<T>(read: () => Promise<T>, attempts = 20): Pr
   }
 }
 
+// Repeats a read that a busy endpoint turned away, waiting longer each time.
+export async function whenAllowed<T>(
+  read: () => Promise<T>,
+  attempts = 4,
+  delay = 1000,
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await read();
+    } catch (error) {
+      if (
+        attempt >= attempts ||
+        !isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) ||
+        error.context.statusCode !== 429
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay * 2 ** (attempt - 1)));
+    }
+  }
+}
+
 export type TokenLabel = Readonly<{ name: string; symbol: string }>;
 
 // Metaplex metadata: key (1), update authority (32), mint (32), then name and symbol as
@@ -137,10 +161,9 @@ export async function fetchTokenLabels(
   mints: readonly Address[],
   config?: ReadConfig,
 ): Promise<ReadonlyMap<Address, TokenLabel>> {
-  const accounts = await fetchEncodedAccounts(
-    rpc,
+  const accounts = await inBatches(
     await Promise.all(mints.map((mint) => getMetadataAddress(mint))),
-    config,
+    (batch) => fetchEncodedAccounts(rpc, batch, config),
   );
   const labels = new Map<Address, TokenLabel>();
   accounts.forEach((account, index) => {
@@ -190,7 +213,9 @@ export async function fetchConditions(
 ): Promise<ReadonlyMap<string, ChainCondition>> {
   const unique = [...new Map(conditionIds.map((id) => [toHex(id), id])).values()];
   const addresses = await Promise.all(unique.map(async (id) => (await getConditionAddress(id))[0]));
-  const accounts = await generatedClient.fetchAllMaybeCondition(rpc, addresses, config);
+  const accounts = await inBatches(addresses, (batch) =>
+    generatedClient.fetchAllMaybeCondition(rpc, batch, config),
+  );
   const conditions = new Map<string, ChainCondition>();
   for (const account of accounts) {
     if (!account.exists) continue;
@@ -235,7 +260,9 @@ async function fetchWrapped(
   }
 
   // Unrelated Token-2022 mints were discarded before this mint-account read.
-  const mints = await fetchAllMaybeMint(rpc, [...amounts.keys()], config);
+  const mints = await inBatches([...amounts.keys()], (batch) =>
+    fetchAllMaybeMint(rpc, batch, config),
+  );
   const wrapped = new Map<string, { positionId: Uint8Array; mint: Address; amount: bigint }>();
   for (const mintAccount of mints) {
     if (!mintAccount.exists || !isSome(mintAccount.data.mintAuthority)) continue;
@@ -262,15 +289,17 @@ type Held = Readonly<{
 }>;
 
 // Everything the owner has a balance account or wrapper tokens for, whatever its collateral.
+// Balances come from one query to the program. Wrapper tokens take a scan of the wallet, and
+// when that fails the balances are still returned, with `wrappedChecked` false.
 async function fetchHeld(
   rpc: LiveRpc,
   owner: Address,
   config?: ReadConfig,
-): Promise<readonly Held[]> {
+): Promise<Readonly<{ held: readonly Held[]; wrappedChecked: boolean }>> {
   const discriminator = getBase58Decoder().decode(
     generatedClient.getPositionBalanceDiscriminatorBytes(),
   ) as Base58EncodedBytes;
-  const [found, wrapped] = await Promise.all([
+  const [found, scanned] = await Promise.all([
     rpc
       .getProgramAccounts(CC_TOKEN_PROGRAM_ADDRESS, {
         encoding: "base64",
@@ -288,8 +317,15 @@ async function fetchHeld(
         ],
       })
       .send(),
-    fetchWrapped(rpc, owner, config),
+    fetchWrapped(rpc, owner, config).catch((error: unknown) => {
+      // A node that is behind has to be asked again, for the balances as much as the tokens.
+      if (isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED)) {
+        throw error;
+      }
+      return null;
+    }),
   ]);
+  const wrapped: NonNullable<typeof scanned> = scanned ?? new Map();
   const balanceDecoder = generatedClient.getPositionBalanceDecoder();
   const native = new Map<string, Readonly<{ positionId: ReadonlyUint8Array; amount: bigint }>>();
   for (const { account } of found) {
@@ -305,12 +341,11 @@ async function fetchHeld(
       ]),
     ).values(),
   ];
-  const definitions = await generatedClient.fetchAllMaybePositionDefinition(
-    rpc,
+  const definitions = await inBatches(
     await Promise.all(positionIds.map(async (id) => (await getPositionAddress(id))[0])),
-    config,
+    (batch) => generatedClient.fetchAllMaybePositionDefinition(rpc, batch, config),
   );
-  return positionIds.flatMap((positionId, index) => {
+  const held = positionIds.flatMap((positionId, index) => {
     const definition = definitions[index]!;
     const key = toHex(positionId);
     return definition.exists
@@ -325,6 +360,7 @@ async function fetchHeld(
         ]
       : [];
   });
+  return { held, wrappedChecked: scanned !== null };
 }
 
 // The collateral tokens the owner holds positions of, most positions first. This is how a
@@ -332,20 +368,33 @@ async function fetchHeld(
 export async function fetchHeldCollaterals(
   rpc: LiveRpc,
   owner: Address,
-): Promise<readonly Readonly<{ mint: Address; positions: number; label: TokenLabel | null }>[]> {
+): Promise<
+  Readonly<{
+    collaterals: readonly Readonly<{
+      mint: Address;
+      positions: number;
+      label: TokenLabel | null;
+    }>[];
+    // False when the wallet could not be searched for wrapped positions.
+    wrappedChecked: boolean;
+  }>
+> {
   const counts = new Map<Address, number>();
-  for (const position of await fetchHeld(rpc, owner)) {
+  const { held, wrappedChecked } = await fetchHeld(rpc, owner);
+  for (const position of held) {
     if (position.amount === 0n && position.wrapped === 0n) continue;
     counts.set(position.collateralMint, (counts.get(position.collateralMint) ?? 0) + 1);
   }
   const labels = await fetchTokenLabels(rpc, [...counts.keys()]);
-  return [...counts]
+  const collaterals = [...counts]
     .map(([mint, positions]) => ({ mint, positions, label: labels.get(mint) ?? null }))
     .sort((left, right) => right.positions - left.positions);
+  return { collaterals, wrappedChecked };
 }
 
 // The wording of a question, read from the memo of the transaction that prepared it and
-// checked against the question ID. Null when no memo was published or none matches.
+// checked against the question ID. Null when no memo was published or none matches; it
+// throws when the history could not be read, which is worth trying again.
 export async function recoverQuestion(
   rpc: LiveRpc,
   condition: ChainCondition,
@@ -354,9 +403,9 @@ export async function recoverQuestion(
   let before: Signature | undefined;
   // Newest first, so the preparing transaction is on the last page. Busy questions are capped.
   for (let page = 0; page < 5; page += 1) {
-    const signatures = await rpc
-      .getSignaturesForAddress(address, { limit: 1000, ...(before ? { before } : {}) })
-      .send();
+    const signatures = await whenAllowed(() =>
+      rpc.getSignaturesForAddress(address, { limit: 1000, ...(before ? { before } : {}) }).send(),
+    );
     for (const { memo } of signatures) {
       const question = memo === null ? null : questionFromMemo(memo, condition);
       if (question) return question;
@@ -374,11 +423,15 @@ export async function fetchPositions(
   mint: Address,
   config?: ReadConfig,
 ): Promise<
-  Readonly<{ positions: readonly LivePosition[]; conditions: ReadonlyMap<string, ChainCondition> }>
+  Readonly<{
+    positions: readonly LivePosition[];
+    conditions: ReadonlyMap<string, ChainCondition>;
+    // False when the wallet could not be searched for wrapped positions.
+    wrappedChecked: boolean;
+  }>
 > {
-  const held = (await fetchHeld(rpc, owner, config)).filter(
-    (position) => position.collateralMint === mint,
-  );
+  const all = await fetchHeld(rpc, owner, config);
+  const held = all.held.filter((position) => position.collateralMint === mint);
 
   // Walk each collection up to the root, one batch of parents at a time.
   type Step = Readonly<{
@@ -392,10 +445,9 @@ export async function fetchPositions(
     const wanted = [...new Map(pending.map((id) => [toHex(id), id])).values()].filter(
       (id) => !steps.has(toHex(id)) && toHex(id) !== COLLATERAL_KEY,
     );
-    const accounts = await generatedClient.fetchAllMaybeCollectionDefinition(
-      rpc,
+    const accounts = await inBatches(
       await Promise.all(wanted.map(async (id) => (await getCollectionAddress(id))[0])),
-      config,
+      (batch) => generatedClient.fetchAllMaybeCollectionDefinition(rpc, batch, config),
     );
     pending = [];
     for (const account of accounts) {
@@ -433,7 +485,7 @@ export async function fetchPositions(
     // The identifier is recomputed from the factors, so a wrong chain cannot be shown.
     return holdingKey(factors) === toHex(collectionId) ? [{ factors, ...balance }] : [];
   });
-  return { positions, conditions };
+  return { positions, conditions, wrappedChecked: all.wrappedChecked };
 }
 
 function isStrictSubset(inner: IndexSetWords, outer: IndexSetWords): boolean {
