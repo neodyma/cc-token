@@ -5,7 +5,8 @@ import { useState, type ReactNode } from "react";
 
 import { Panel } from "./components.tsx";
 import { LiveWorkspace } from "./LiveWorkspace.tsx";
-import { ROUTES } from "./routes.ts";
+import { LiveScenarioDiscovery, LiveScenarioDetail } from "./live/scenarios.tsx";
+import { ROUTES, scenarioAddressFromRoute } from "./routes.ts";
 import { client, CLUSTER } from "./solana.ts";
 import { useProgramDeployed } from "./Wallet.tsx";
 
@@ -53,11 +54,12 @@ const ACTIONS: readonly Readonly<{ action: string; detail: string; instructions:
   },
 ];
 
-export function Live() {
+export function Live(props: { route: string }) {
   const deployed = useProgramDeployed();
   const live = deployed.state === "ready" && deployed.value;
   const connected = useConnectedWallet(client);
   const ready = live && connected !== null;
+  const scenarioAddress = scenarioAddressFromRoute(props.route);
 
   const status = (
     <ul className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-line bg-panel px-4 py-2 text-sm">
@@ -98,6 +100,18 @@ export function Live() {
     </ul>
   );
 
+  if (live && scenarioAddress !== null) {
+    return (
+      <div className="flex flex-col gap-4">
+        {status}
+        <LiveScenarioDetail
+          addressText={scenarioAddress}
+          owner={connected?.account.address as Address | undefined}
+        />
+      </div>
+    );
+  }
+
   if (ready && connected) {
     return (
       <div className="flex flex-col gap-4">
@@ -106,6 +120,7 @@ export function Live() {
           key={connected.account.address}
           owner={connected.account.address as Address}
         />
+        <LiveScenarioDiscovery owner={connected.account.address as Address} />
       </div>
     );
   }
@@ -151,6 +166,7 @@ export function Live() {
           </tbody>
         </table>
       </Panel>
+      {live && <LiveScenarioDiscovery />}
     </div>
   );
 }

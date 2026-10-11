@@ -2,6 +2,7 @@ import {
   CC_TOKEN_PROGRAM_ADDRESS,
   generatedClient,
   payoutRatio,
+  validateScenarioName,
   type ConditionClause,
 } from "@cc-token/sdk";
 import {
@@ -30,6 +31,7 @@ import {
   mintTestCollateral,
   nameTestCollateral,
   prepareQuestion,
+  publishScenario,
   redeem,
   registerCollateral,
   reportPayouts,
@@ -61,7 +63,7 @@ import {
   type StoredQuestion,
 } from "./live/questions.ts";
 import { PositionGraph, type GraphNode } from "./PositionGraph.tsx";
-import { ROUTES } from "./routes.ts";
+import { liveScenarioRoute, ROUTES } from "./routes.ts";
 import {
   attempt,
   boxLabel,
@@ -346,6 +348,15 @@ export function LiveWorkspace(props: { owner: Address }) {
         questions.current = [...questions.current, question];
         saveQuestions(localStorage, questionsKey, questions.current);
       }}
+      onPublishScenario={async (name, factors, mode) => {
+        const published: { address: Address | null } = { address: null };
+        await run("Publishing the scenario", `Published the scenario “${name}”.`, async () => {
+          const result = await publishScenario(client, chain.collateral.mint, name, factors, mode);
+          published.address = result.address;
+          return result.signatures;
+        });
+        if (published.address) window.location.hash = liveScenarioRoute(published.address);
+      }}
     />
   );
 }
@@ -455,6 +466,11 @@ function Workspace(props: {
   onRefresh: () => void;
   onChangeToken: () => void;
   onAddQuestion: (question: StoredQuestion) => void;
+  onPublishScenario: (
+    name: string,
+    factors: readonly ConditionClause[],
+    mode: "logical" | "product",
+  ) => Promise<void>;
 }) {
   const { owner, chain, selection } = props;
   const { collateral } = chain;
@@ -924,6 +940,201 @@ function Workspace(props: {
           )}
         </section>
       </div>
+      <ScenarioPublisher
+        conditions={conditions}
+        busy={props.busy !== null}
+        onPublish={props.onPublishScenario}
+      />
     </fieldset>
+  );
+}
+
+type ScenarioFactorDraft = Readonly<{
+  id: string;
+  conditionKey: string;
+  outcomes: readonly number[];
+}>;
+
+function ScenarioPublisher(props: {
+  conditions: readonly DemoCondition[];
+  busy: boolean;
+  onPublish: (
+    name: string,
+    factors: readonly ConditionClause[],
+    mode: "logical" | "product",
+  ) => Promise<void>;
+}) {
+  const first = props.conditions[0];
+  const [name, setName] = useState("");
+  const [mode, setMode] = useState<"logical" | "product">("logical");
+  const [factors, setFactors] = useState<readonly ScenarioFactorDraft[]>(() =>
+    first ? [{ id: crypto.randomUUID(), conditionKey: first.key, outcomes: [0] }] : [],
+  );
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (window.location.hash !== ROUTES.liveCreate) return;
+    document.getElementById("scenario-creator")?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    if (factors.length > 0 || !first) return;
+    setFactors([{ id: crypto.randomUUID(), conditionKey: first.key, outcomes: [0] }]);
+  }, [factors.length, first]);
+
+  function update(id: string, next: Partial<Omit<ScenarioFactorDraft, "id">>) {
+    setFactors((current) =>
+      current.map((factor) => (factor.id === id ? { ...factor, ...next } : factor)),
+    );
+  }
+
+  function submit() {
+    try {
+      validateScenarioName(name);
+      if (factors.length === 0) throw new RangeError("Add at least one question factor.");
+      const clauses = factors.map((factor) => {
+        const condition = props.conditions.find(
+          (candidate) => candidate.key === factor.conditionKey,
+        );
+        if (!condition) throw new RangeError("Choose a prepared question for every factor.");
+        if (factor.outcomes.length === 0 || factor.outcomes.length === condition.outcomes.length) {
+          throw new RangeError("Each featured subset must include some, but not all, outcomes.");
+        }
+        const words: [bigint, bigint, bigint, bigint] = [0n, 0n, 0n, 0n];
+        for (const outcome of factor.outcomes) {
+          words[Math.floor(outcome / 64)]! |= 1n << BigInt(outcome % 64);
+        }
+        return {
+          conditionId: condition.conditionId,
+          outcomeCount: condition.outcomes.length,
+          indexSet: words,
+        } satisfies ConditionClause;
+      });
+      setProblem(null);
+      void props.onPublish(name, clauses, mode);
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return (
+    <section
+      id="scenario-creator"
+      className="min-w-0 rounded-xl border border-line bg-panel p-4 xl:col-span-2"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-medium">Publish this scenario</h2>
+          <p className="mt-1 text-sm text-muted">
+            Name a condition basis without depositing. Its featured claim becomes the discovery
+            entrypoint.
+          </p>
+        </div>
+        <select
+          value={mode}
+          onChange={(event) => setMode(event.target.value as "logical" | "product")}
+          className="rounded-md border border-line bg-page px-2 py-1.5 text-sm"
+          aria-label="Composition mode"
+        >
+          <option value="logical">Logical conjunction</option>
+          <option value="product">Explicit product</option>
+        </select>
+      </div>
+      <fieldset disabled={props.busy} className="m-0 mt-4 flex min-w-0 flex-col gap-4 border-0 p-0">
+        <label className="text-sm">
+          <span className="font-medium">Name</span>
+          <input
+            value={name}
+            maxLength={64}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="SOL/USD at expiry"
+            className="mt-1 block w-full rounded-md border border-line bg-page px-2 py-1.5"
+          />
+          <span className="mt-1 block text-xs text-muted">
+            {new TextEncoder().encode(name).length}/64 UTF-8 bytes
+          </span>
+        </label>
+        {props.conditions.length === 0 ? (
+          <p className="text-sm text-muted">Prepare at least one question above first.</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {factors.map((factor, factorIndex) => {
+              const condition =
+                props.conditions.find((candidate) => candidate.key === factor.conditionKey) ??
+                first!;
+              return (
+                <div key={factor.id} className="rounded-lg border border-line p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium">Factor {factorIndex + 1}</span>
+                    <select
+                      value={factor.conditionKey}
+                      onChange={(event) =>
+                        update(factor.id, { conditionKey: event.target.value, outcomes: [0] })
+                      }
+                      className="min-w-0 flex-1 rounded-md border border-line bg-page px-2 py-1.5 text-sm"
+                    >
+                      {props.conditions.map((candidate) => (
+                        <option key={candidate.key} value={candidate.key}>
+                          {candidate.title}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={factors.length === 1}
+                      onClick={() =>
+                        setFactors((current) => current.filter((item) => item.id !== factor.id))
+                      }
+                      className="text-xs text-muted hover:text-bad disabled:opacity-30"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                    {condition.outcomes.map((outcome, index) => (
+                      <label key={outcome} className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={factor.outcomes.includes(index)}
+                          onChange={(event) =>
+                            update(factor.id, {
+                              outcomes: event.target.checked
+                                ? [...factor.outcomes, index].sort((left, right) => left - right)
+                                : factor.outcomes.filter((value) => value !== index),
+                            })
+                          }
+                        />
+                        {outcome}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() =>
+                setFactors((current) => [
+                  ...current,
+                  { id: crypto.randomUUID(), conditionKey: first!.key, outcomes: [0] },
+                ])
+              }
+              className="self-start text-sm text-accent underline"
+            >
+              Add another factor
+            </button>
+          </div>
+        )}
+        {problem && <p className="rounded-md bg-bad-soft px-3 py-2 text-sm text-bad">{problem}</p>}
+        <button
+          type="button"
+          disabled={props.busy || props.conditions.length === 0 || name === ""}
+          onClick={submit}
+          className="self-start rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-panel disabled:opacity-40"
+        >
+          Publish scenario
+        </button>
+      </fieldset>
+    </section>
   );
 }

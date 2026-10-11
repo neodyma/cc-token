@@ -17,6 +17,8 @@ import {
   getRedeemRootCollateralInstruction,
   getRegisterCollateralInstructionAsync,
   getRegisterCollectionInstruction,
+  getScenarioAddress,
+  getUpdateScenarioDefinitionNameInstruction,
   getReportPayoutsInstruction,
   getRootCollateralSetupInstructions,
   getSplitNativePositionInstruction,
@@ -25,6 +27,7 @@ import {
   getUnwrapWrappedPositionInstruction,
   getWrapNativePositionInstruction,
   planPayoutReport,
+  planScenarioAnchor,
   ROOT_COLLECTION_ID,
   validatePartition,
   type ConditionClause,
@@ -55,6 +58,7 @@ import {
   type GetTokenAccountsByOwnerApi,
   type Instruction,
   type InstructionPlan,
+  type ReadonlyUint8Array,
   type Rpc,
   type Signature,
   type TransactionPlanResult,
@@ -317,6 +321,41 @@ export async function registerCollateral(
       payer: client.payer,
       mint: collateral.mint,
       tokenProgram: collateral.tokenProgram,
+    }),
+  ]);
+}
+
+export async function publishScenario(
+  client: LiveClient,
+  collateralMint: Address,
+  name: string,
+  factors: readonly ConditionClause[],
+  mode: "logical" | "product",
+): Promise<Readonly<{ address: Address; signatures: readonly Signature[] }>> {
+  const plan = await planScenarioAnchor({
+    payer: client.payer,
+    creator: client.payer,
+    collateralMint,
+    factors,
+    mode,
+    name,
+  });
+  const setup = await withoutExisting(client, plan.setupInstructions);
+  const signatures = await send(client, [...setup, plan.registerScenarioInstruction]);
+  const [address] = await getScenarioAddress(client.payer.address, plan.anchorPositionId);
+  return { address, signatures };
+}
+
+export async function renameScenario(
+  client: LiveClient,
+  anchorPositionId: ReadonlyUint8Array,
+  name: string,
+): Promise<readonly Signature[]> {
+  return send(client, [
+    await getUpdateScenarioDefinitionNameInstruction({
+      creator: client.payer,
+      anchorPositionId,
+      name,
     }),
   ]);
 }

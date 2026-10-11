@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { TOKEN_2022_PROGRAM_ADDRESS, type ConditionClause } from "@cc-token/sdk";
+import {
+  classifyScenarioParticipation,
+  fetchAllVerifiedScenarios,
+  fetchVerifiedScenario,
+  TOKEN_2022_PROGRAM_ADDRESS,
+  type ConditionClause,
+} from "@cc-token/sdk";
 import {
   findAssociatedTokenPda,
   getCreateAssociatedTokenIdempotentInstruction,
@@ -16,8 +22,10 @@ import {
   merge,
   mintTestCollateral,
   prepareQuestion,
+  publishScenario,
   redeem,
   reportPayouts,
+  renameScenario,
   split,
   transfer,
   unwrap,
@@ -100,6 +108,28 @@ test("the live page's transactions run the whole lifecycle", async () => {
   const onTime = on(launchRef, [0]);
   const late = on(launchRef, [1]);
 
+  // Scenario publication registers a zero-balance anchor and becomes globally discoverable.
+  const published = await publishScenario(
+    client,
+    created.mint,
+    "Weather and launch",
+    [dry, onTime],
+    "logical",
+  );
+  assert.ok(published.signatures.length >= 1);
+  const scenario = await fetchVerifiedScenario(client.rpc, published.address);
+  assert.equal(scenario.definition.data.name, "Weather and launch");
+  assert.equal(scenario.factorCount, 2);
+  assert.equal(scenario.state, "active");
+  const discovery = await fetchAllVerifiedScenarios(client.rpc);
+  assert.ok(
+    discovery.scenarios.some((candidate) => candidate.definition.address === published.address),
+  );
+  assert.equal(discovery.failures.length, 0);
+  await renameScenario(client, scenario.definition.data.anchorPositionId, "Weather and launch v2");
+  const renamed = await fetchVerifiedScenario(client.rpc, published.address);
+  assert.equal(renamed.definition.data.name, "Weather and launch v2");
+
   async function balances(mint: Address = created.mint) {
     const { positions } = await fetchPositions(client.rpc, owner, mint);
     return new Map(positions.map((position) => [holdingKey(position.factors), position.amount]));
@@ -134,6 +164,13 @@ test("the live page's transactions run the whole lifecycle", async () => {
   assert.equal(await held([snow]), 0n);
   assert.equal(await held([snow, onTime]), 100n * UNIT);
   assert.equal(await held([late, snow]), 100n * UNIT);
+  assert.equal(
+    classifyScenarioParticipation(scenario, {
+      collateralMint: created.mint,
+      factors: [snow, onTime],
+    }),
+    "exact",
+  );
 
   const { positions } = await fetchPositions(client.rpc, owner, created.mint);
   const ledger = ledgerFromPositions(await free(), positions);

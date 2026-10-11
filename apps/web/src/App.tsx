@@ -20,7 +20,8 @@ function useHash(): string {
 export function App() {
   const hash = useHash();
   // The simulator is also the landing page.
-  const route = hash === ROUTES.docs || hash === ROUTES.live ? hash : ROUTES.simulator;
+  const route = hash === ROUTES.docs || hash.startsWith(ROUTES.live) ? hash : ROUTES.simulator;
+  const live = route.startsWith(ROUTES.live);
 
   return (
     <>
@@ -39,7 +40,7 @@ export function App() {
             <NavLink href={ROUTES.simulator} active={route === ROUTES.simulator}>
               Simulator
             </NavLink>
-            <NavLink href={ROUTES.live} active={route === ROUTES.live}>
+            <NavLink href={ROUTES.live} active={live}>
               Live
             </NavLink>
           </nav>
@@ -52,7 +53,7 @@ export function App() {
       <main
         className={`mx-auto max-w-screen-2xl px-4 sm:px-6 ${route === ROUTES.simulator ? "py-4" : "py-8"}`}
       >
-        {route === ROUTES.docs ? <HowItWorks /> : route === ROUTES.live ? <Live /> : <Simulator />}
+        {route === ROUTES.docs ? <HowItWorks /> : live ? <Live route={route} /> : <Simulator />}
       </main>
       <Toasts />
     </>

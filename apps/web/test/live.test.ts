@@ -17,10 +17,18 @@ import {
   unnamedCondition,
 } from "../src/live/questions.ts";
 import { holdingKey, indexSetFromOutcomes, toHex } from "../src/scenario.ts";
+import { liveScenarioRoute, scenarioAddressFromRoute } from "../src/routes.ts";
 
 const resolver = getAddressDecoder().decode(new Uint8Array(32).fill(5));
 const weather = toCondition(newQuestion(resolver, "Weather", ["sun", "rain", "snow"], "salt"));
 const launch = toCondition(newQuestion(resolver, "Launch", ["on time", "late"], "salt"));
+
+test("scenario routes preserve canonical account addresses", () => {
+  const scenario = "Vote111111111111111111111111111111111111111";
+  assert.equal(scenarioAddressFromRoute(liveScenarioRoute(scenario)), scenario);
+  assert.equal(scenarioAddressFromRoute("#/live"), null);
+  assert.equal(scenarioAddressFromRoute("#/live/scenario/"), null);
+});
 
 function on(condition: typeof weather, outcomes: readonly number[]): ConditionClause {
   return {
