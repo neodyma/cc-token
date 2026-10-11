@@ -9,6 +9,7 @@ import { address, type Address, type ReadonlyUint8Array } from "@solana/kit";
 import { useEffect, useState } from "react";
 
 import { Panel } from "../components.tsx";
+import { describeError } from "../errors.ts";
 import { liveScenarioRoute, ROUTES } from "../routes.ts";
 import { toHex } from "../scenario.ts";
 import { client } from "../solana.ts";
@@ -87,7 +88,7 @@ export function LiveScenarioDiscovery(props: { owner?: Address }) {
         setRows(next);
         setFailureCount(discovery.failures.length);
       } catch (error) {
-        if (current) setProblem(error instanceof Error ? error.message : String(error));
+        if (current) setProblem(describeError(error));
       }
     })();
     return () => {
@@ -103,7 +104,9 @@ export function LiveScenarioDiscovery(props: { owner?: Address }) {
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
         <p className="text-muted">
           {rows === null
-            ? "Reading scenarios from devnet…"
+            ? problem
+              ? "Scenarios temporarily unavailable"
+              : "Reading scenarios from devnet…"
             : `${rows.length} ${rows.length === 1 ? "scenario" : "scenarios"}`}
           {failureCount > 0 ? ` · ${failureCount} invalid entries hidden` : ""}
         </p>
@@ -143,7 +146,6 @@ export function LiveScenarioDiscovery(props: { owner?: Address }) {
                 <th className="py-2 pr-4 font-medium">Collateral</th>
                 <th className="py-2 pr-4 font-medium">Questions</th>
                 <th className="py-2 pr-4 font-medium">Creator</th>
-                <th className="py-2 text-right font-medium">Registered</th>
               </tr>
             </thead>
             <tbody>
@@ -185,9 +187,6 @@ export function LiveScenarioDiscovery(props: { owner?: Address }) {
                     title={scenario.definition.data.creator}
                   >
                     {shorten(scenario.definition.data.creator)}
-                  </td>
-                  <td className="py-3 text-right font-mono text-xs text-muted">
-                    slot {scenario.definition.data.registeredSlot.toString()}
                   </td>
                 </tr>
               ))}
@@ -280,7 +279,7 @@ export function LiveScenarioDetail(props: { addressText: string; owner?: Address
           });
         }
       } catch (error) {
-        if (current) setProblem(error instanceof Error ? error.message : String(error));
+        if (current) setProblem(describeError(error));
       }
     })();
     return () => {
@@ -397,7 +396,7 @@ function RenameScenario(props: {
           },
           (error) => {
             setBusy(false);
-            setProblem(error instanceof Error ? error.message : String(error));
+            setProblem(describeError(error));
           },
         );
       }}

@@ -47,6 +47,8 @@ import { fetchVerifiedCollateral } from "./collateral.ts";
 import {
   fetchEncodedAccounts,
   getBase58Decoder,
+  isSolanaError,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
   type Account,
   type Address,
   type Base58EncodedBytes,
@@ -271,7 +273,8 @@ export async function fetchAllVerifiedScenarios(
       async (mint) => {
         try {
           collateral.set(mint, await fetchVerifiedCollateral(rpc, mint, config));
-        } catch {
+        } catch (cause) {
+          if (isSolanaError(cause, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR)) throw cause;
           // Report the error against each dependent scenario below.
         }
       },

@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { deriveConditionId, type ConditionClause } from "@cc-token/sdk";
-import { getAddressDecoder } from "@solana/kit";
+import {
+  getAddressDecoder,
+  SolanaError,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
+} from "@solana/kit";
 
+import { describeError } from "../src/errors.ts";
 import { COLLATERAL_KEY, layoutGraph } from "../src/ledger.ts";
 import { getNameTokenInstruction, TEST_TOKEN_NAME } from "../src/live/chain.ts";
 import { decodeTokenLabel, ledgerFromPositions } from "../src/live/discovery.ts";
@@ -22,6 +27,18 @@ import { liveScenarioRoute, scenarioAddressFromRoute } from "../src/routes.ts";
 const resolver = getAddressDecoder().decode(new Uint8Array(32).fill(5));
 const weather = toCondition(newQuestion(resolver, "Weather", ["sun", "rain", "snow"], "salt"));
 const launch = toCondition(newQuestion(resolver, "Launch", ["on time", "late"], "salt"));
+
+test("HTTP rate limits are described without hiding the status", () => {
+  const error = new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+    headers: new Headers({ "retry-after": "10" }),
+    message: "",
+    statusCode: 429,
+  });
+  assert.equal(
+    describeError(error),
+    "The Solana RPC rate limit was reached. Retry after 10 seconds.",
+  );
+});
 
 test("scenario routes preserve canonical account addresses", () => {
   const scenario = "Vote111111111111111111111111111111111111111";

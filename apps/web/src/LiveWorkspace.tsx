@@ -1,21 +1,14 @@
 import {
   CC_TOKEN_PROGRAM_ADDRESS,
-  generatedClient,
   payoutRatio,
   validateScenarioName,
   type ConditionClause,
 } from "@cc-token/sdk";
-import {
-  address,
-  isSolanaError,
-  SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM,
-  type Address,
-  type Signature,
-  type Slot,
-} from "@solana/kit";
+import { address, type Address, type Signature, type Slot } from "@solana/kit";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Panel } from "./components.tsx";
+import { describeError } from "./errors.ts";
 import {
   ConditionInspector,
   NodeActions,
@@ -121,23 +114,6 @@ function transactionLinks(signatures: readonly Signature[]) {
 
 function shorten(value: string): string {
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
-}
-
-function describeError(error: unknown): string {
-  let message = String(error);
-  for (let current = error; current instanceof Error; current = current.cause) {
-    message = current.message;
-    if (isSolanaError(current, SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM)) {
-      const { code } = current.context;
-      // Messages are left out of production bundles, so the code is always shown.
-      const known =
-        code >= 6000 && process.env.NODE_ENV !== "production"
-          ? generatedClient.getCcTokenErrorMessage(code as generatedClient.CcTokenError)
-          : undefined;
-      return `The program refused with error ${code}${known ? `: ${known}` : ""}.`;
-    }
-  }
-  return message;
 }
 
 export function LiveWorkspace(props: { owner: Address }) {
