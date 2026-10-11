@@ -143,6 +143,7 @@
 - [ ] Version-0-only wallet behavior
 - [ ] Optional transaction v1 behavior
 - [ ] Browser error and interrupted-flow tests
+- [x] Opt-in server-side Vercel RPC proxy
 - [ ] Complete LOI demonstration
 
 ## 10. Release validation and handoff

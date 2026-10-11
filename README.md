@@ -50,9 +50,6 @@ pnpm dev:web
 
 Then open <http://localhost:5173>. `pnpm build` is needed once so the program IDL exists; `pnpm dev:web` regenerates the SDK client from it and starts the Vite dev server.
 
-The wallet button targets Solana devnet. Set `VITE_SOLANA_RPC_URL` to use a different devnet RPC
-endpoint.
-
 The Live page's transactions are tested against a local validator by `pnpm test:integration`, with
 a keypair in place of the wallet. There are no automated browser tests.
 

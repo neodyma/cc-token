@@ -24,6 +24,27 @@ A wallet that was only sent positions starts from its address alone. The first s
 
 A new position needs its collection, position and balance accounts. The page skips the ones that exist and packs the rest into as few version-0 transactions as fit, so a first deposit takes two or three approvals and a repeat takes one.
 
+## Private RPC on Vercel
+
+The browser uses `VITE_SOLANA_RPC_URL` when it is set and otherwise calls the public devnet RPC.
+Like every Vite variable, `VITE_SOLANA_RPC_URL` is public and must not contain a provider secret.
+
+For a Vercel deployment whose Root Directory is `apps/web`, set `SOLANA_RPC_URL` to the complete
+HTTPS endpoint in the Vercel project's server-side environment variables, then redeploy. Its
+presence during `vite build` enables `/api/rpc`; the value itself is read only by the Vercel
+Function at runtime. If the variable is absent, or the application runs through plain `vite dev`,
+the browser keeps using the public endpoint as before.
+
+The function accepts same-origin browser POSTs, an allowlist of the RPC methods used by the Live
+page, requests up to 64 KiB and batches of at most 10 calls. It forwards provider `429` responses
+and `Retry-After` without returning the configured URL. Origin checks prevent ordinary cross-site
+browser use but are not authentication: a direct client can forge browser headers. Apply a Vercel
+Firewall rate limit to `/api/rpc` if the provider plan needs an enforceable traffic budget.
+
+Vercel Functions do not proxy WebSockets here. Solana subscriptions continue to use the public
+devnet WebSocket endpoint; transaction bodies, simulations and account reads use the configured
+HTTP provider.
+
 ## What was checked
 
 `pnpm test:integration` runs `apps/web/test/live.integration.ts` against a local validator loaded with the compiled program. It uses the same Kit client stack as the browser with a generated keypair in place of the wallet, and covers test collateral, two questions, deposit, narrowing, combining, each kind of merge, sending native shares to a new address, wrapping, unwrapping, a wrapped token sent to and unwrapped by another wallet, which finds the collateral and the question wording from its address alone, an unauthorized report, both reports and redemption to a residual position and to collateral.
