@@ -3,7 +3,20 @@ export const ROUTES = {
   simulator: "#/simulator",
   live: "#/live",
   liveCreate: "#/live/create",
+  pitch: "#/pitch",
 } as const;
+
+// The talk, one address per slide so that coming back from the demo lands on the same one.
+export function pitchRoute(slide: number): string {
+  return slide === 0 ? ROUTES.pitch : `${ROUTES.pitch}/${slide + 1}`;
+}
+
+export function pitchSlideFromRoute(route: string): number | null {
+  if (route === ROUTES.pitch) return 0;
+  if (!route.startsWith(`${ROUTES.pitch}/`)) return null;
+  const slide = Number(route.slice(ROUTES.pitch.length + 1));
+  return Number.isInteger(slide) && slide >= 1 ? slide - 1 : 0;
+}
 
 export const LIVE_SCENARIO_ROUTE = "#/live/scenario/";
 

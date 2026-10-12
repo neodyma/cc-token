@@ -2,7 +2,8 @@ import { useSyncExternalStore } from "react";
 
 import { HowItWorks } from "./HowItWorks.tsx";
 import { Live } from "./Live.tsx";
-import { ROUTES } from "./routes.ts";
+import { Presentation } from "./Presentation.tsx";
+import { pitchSlideFromRoute, ROUTES } from "./routes.ts";
 import { Simulator } from "./Simulator.tsx";
 import { Toasts } from "./toast.tsx";
 import { WalletBar } from "./Wallet.tsx";
@@ -23,6 +24,10 @@ export function App() {
   const requestedLive = hash === ROUTES.live || hash.startsWith(`${ROUTES.live}/`);
   const route = hash === ROUTES.docs || requestedLive ? hash : ROUTES.simulator;
   const live = requestedLive;
+
+  // The talk takes the whole window, without the site header.
+  const pitchSlide = pitchSlideFromRoute(hash);
+  if (pitchSlide !== null) return <Presentation index={pitchSlide} />;
 
   return (
     <>
