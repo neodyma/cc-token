@@ -4,6 +4,7 @@ export const ROUTES = {
   live: "#/live",
   liveCreate: "#/live/create",
   pitch: "#/pitch",
+  presenter: "#/presenter",
 } as const;
 
 // The talk, one address per slide so that coming back from the demo lands on the same one.
@@ -12,9 +13,22 @@ export function pitchRoute(slide: number): string {
 }
 
 export function pitchSlideFromRoute(route: string): number | null {
-  if (route === ROUTES.pitch) return 0;
-  if (!route.startsWith(`${ROUTES.pitch}/`)) return null;
-  const slide = Number(route.slice(ROUTES.pitch.length + 1));
+  return slideFromRoute(ROUTES.pitch, route);
+}
+
+// The speaker's own window: the notes for the slide shown in the shared one.
+export function presenterRoute(slide: number): string {
+  return slide === 0 ? ROUTES.presenter : `${ROUTES.presenter}/${slide + 1}`;
+}
+
+export function presenterSlideFromRoute(route: string): number | null {
+  return slideFromRoute(ROUTES.presenter, route);
+}
+
+function slideFromRoute(base: string, route: string): number | null {
+  if (route === base) return 0;
+  if (!route.startsWith(`${base}/`)) return null;
+  const slide = Number(route.slice(base.length + 1));
   return Number.isInteger(slide) && slide >= 1 ? slide - 1 : 0;
 }
 

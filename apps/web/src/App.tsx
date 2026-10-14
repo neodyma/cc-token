@@ -2,8 +2,8 @@ import { useSyncExternalStore } from "react";
 
 import { HowItWorks } from "./HowItWorks.tsx";
 import { Live } from "./Live.tsx";
-import { Presentation } from "./Presentation.tsx";
-import { pitchSlideFromRoute, ROUTES } from "./routes.ts";
+import { Presentation, PresenterView } from "./Presentation.tsx";
+import { pitchSlideFromRoute, presenterSlideFromRoute, ROUTES } from "./routes.ts";
 import { Simulator } from "./Simulator.tsx";
 import { Toasts } from "./toast.tsx";
 import { WalletBar } from "./Wallet.tsx";
@@ -28,6 +28,8 @@ export function App() {
   // The talk takes the whole window, without the site header.
   const pitchSlide = pitchSlideFromRoute(hash);
   if (pitchSlide !== null) return <Presentation index={pitchSlide} />;
+  const presenterSlide = presenterSlideFromRoute(hash);
+  if (presenterSlide !== null) return <PresenterView index={presenterSlide} />;
 
   return (
     <>
