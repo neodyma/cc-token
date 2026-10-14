@@ -1,17 +1,17 @@
 import { CC_TOKEN_PROGRAM_ADDRESS } from "@cc-token/sdk";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { pitchRoute, ROUTES } from "./routes.ts";
+import { liveScenarioRoute, pitchRoute, ROUTES } from "./routes.ts";
 import { CLUSTER } from "./solana.ts";
 
 // The five-minute talk, as slides inside the app so the demo is one click away. Each slide
 // carries what is said over it, shown with the N key.
-type Slide = Readonly<{ title: string; notes: string; body: ReactNode }>;
+type Slide = Readonly<{ title: string; notes: string; compact?: boolean; body: ReactNode }>;
 
-function Card(props: { tone?: "accent" | "plain"; children: ReactNode }) {
+function Card(props: { tone?: "accent" | "plain"; compact?: boolean; children: ReactNode }) {
   return (
     <div
-      className={`rounded-2xl border p-6 ${
+      className={`rounded-2xl border ${props.compact ? "p-4" : "p-6"} ${
         props.tone === "accent" ? "border-accent bg-accent-soft" : "border-line bg-panel"
       }`}
     >
@@ -19,6 +19,8 @@ function Card(props: { tone?: "accent" | "plain"; children: ReactNode }) {
     </div>
   );
 }
+
+const DEMO_SCENARIO_ADDRESS = "6GUMH37oBtvRvKmAXDPLKEuXsWrToxGvtPpETyp21jWC";
 
 function Bar(props: { percent: number; label: string }) {
   return (
@@ -162,7 +164,9 @@ const SLIDES: readonly Slide[] = [
           ))}
         </ol>
         <a
-          href={ROUTES.live}
+          href={liveScenarioRoute(DEMO_SCENARIO_ADDRESS)}
+          target="_blank"
+          rel="noreferrer"
           className="rounded-2xl bg-accent px-10 py-6 text-3xl font-semibold text-panel shadow-lg"
         >
           Open the demo →
@@ -288,11 +292,12 @@ const SLIDES: readonly Slide[] = [
   },
   {
     title: "Backup: ask the same question twice for a curved payout",
+    compact: true,
     notes:
-      "Once results are weights, a question can be used twice on purpose. Take an RPC provider that posts a bond against downtime. One question: what share of the month was the service down? If it was down a quarter of the month, “down” gets weight 25 and “up” gets 75. A position on “down” pays 25. A position on “down and down”, the same question applied twice, pays 25% of 25%, which is 6.25. So the payout is the square of the downtime: small outages cost almost nothing, large ones cost a lot. The four pieces still add up to the 100 deposited, so it is fully backed like everything else. The same construction gives any payout that is a power of a reported fraction.",
+      "Once results are weights, a question can be used twice on purpose. Take an RPC provider that posts a bond against downtime. One question: what share of the month was the service down? If it was down a quarter of the month, “down” gets weight 25 and “up” gets 75. A position on “down” pays 25. A position on “down and down”, the same question applied twice, pays 25% of 25%, which is 6.25. So the payout is the square of the downtime: small outages cost almost nothing, large ones cost a lot. Four split paths collapse into three positions because “down and up” is the same position as “up and down”. It receives 100 shares from each path, so 200 shares pay 37.5 in total and all three positions still pay the 100 deposited. The same construction gives any payout that is a power of a reported fraction.",
     body: (
-      <div className="flex flex-col gap-8">
-        <Card>
+      <div className="flex flex-col gap-4">
+        <Card compact>
           <div className="text-xl text-muted">An uptime bond: one question, used twice</div>
           <div className="mt-2 text-3xl font-medium">
             What share of the month was the service down?
@@ -301,21 +306,24 @@ const SLIDES: readonly Slide[] = [
             Down a quarter of the month: the resolver reports 25 to “down” and 75 to “up”.
           </p>
         </Card>
-        <div className="grid grid-cols-4 gap-4 text-lg">
-          {[
-            ["down × down", "6.25", "25% of 25%", true],
-            ["down × up", "18.75", "25% of 75%", false],
-            ["up × down", "18.75", "75% of 25%", false],
-            ["up × up", "56.25", "75% of 75%", false],
-          ].map(([name, pays, why, featured]) => (
-            <Card key={name as string} tone={featured ? "accent" : "plain"}>
-              <div className="text-muted">100 shares of “{name}”</div>
+        <div className="grid grid-cols-3 gap-4 text-lg">
+          {(
+            [
+              ["down × down", "100 shares", "6.25", "25% × 25%", true],
+              ["down × up", "200 shares", "37.5", "same ID as up × down · 2 × 25% × 75%", false],
+              ["up × up", "100 shares", "56.25", "75% × 75%", false],
+            ] as const
+          ).map(([name, shares, pays, why, featured]) => (
+            <Card key={name} tone={featured ? "accent" : "plain"} compact>
+              <div className="text-muted">
+                {shares} of “{name}”
+              </div>
               <div className="mt-2 font-mono text-4xl font-semibold">{pays}</div>
-              <div className="mt-1 text-muted">{why}</div>
+              <div className="mt-1 text-muted">total payout · {why}</div>
             </Card>
           ))}
         </div>
-        <div className="grid grid-cols-[auto_1fr] items-center gap-8">
+        <div className="grid grid-cols-[auto_1fr] items-center gap-6">
           <table className="text-left font-mono text-xl">
             <thead className="text-muted">
               <tr className="border-b border-line">
@@ -339,7 +347,7 @@ const SLIDES: readonly Slide[] = [
           </table>
           <p className="text-2xl text-muted">
             The payout is the square of the downtime: small outages cost little, large ones cost a
-            lot. The four pieces still add up to the 100 deposited.
+            lot. Four split paths collapse into three balances, which still pay the 100 deposited.
           </p>
         </div>
       </div>
@@ -406,9 +414,13 @@ export function Presentation(props: { index: number }) {
 
   return (
     <div className="fixed inset-0 z-20 flex flex-col bg-page text-ink">
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center overflow-y-auto px-10 py-8">
+      <main
+        className={`mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center overflow-y-auto px-10 ${slide.compact ? "py-4" : "py-8"}`}
+      >
         {index > 0 && (
-          <h2 className="mb-10 text-5xl leading-tight font-semibold tracking-tight">
+          <h2
+            className={`${slide.compact ? "mb-6 text-4xl" : "mb-10 text-5xl"} leading-tight font-semibold tracking-tight`}
+          >
             {slide.title}
           </h2>
         )}
