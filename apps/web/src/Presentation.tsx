@@ -1,5 +1,5 @@
 import { CC_TOKEN_PROGRAM_ADDRESS } from "@cc-token/sdk";
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 
 import { liveScenarioRoute, pitchRoute, ROUTES } from "./routes.ts";
 import { CLUSTER } from "./solana.ts";
@@ -57,11 +57,20 @@ const COMPARISON: readonly (readonly [string, string, string])[] = [
   ["Holding it elsewhere", "Tied to the venue", "A standard Token-2022 token"],
 ];
 
+// Who does what, phase by phase. An empty cell means that actor has nothing to do then.
+const ACTORS = ["Creator", "Holder", "Resolver"] as const;
+const WORKFLOW: readonly Readonly<{ phase: string; cells: readonly (string | null)[] }>[] = [
+  { phase: "Set up", cells: ["Publish scenario", null, "Prepare questions"] },
+  { phase: "Issue", cells: ["Deposit → every piece", null, null] },
+  { phase: "Distribute", cells: ["Keep bet, sell rest", "Receive or buy", null] },
+  { phase: "Settle", cells: ["Redeem", "Redeem or sell", "Report results"] },
+];
+
 const SLIDES: readonly Slide[] = [
   {
     title: "cc-token",
     notes:
-      "We are building cc-token: combinatorial conditional tokens on Solana. In five minutes: the problem, what it is, a live demo, and how it compares.",
+      "Most prediction markets let you buy “the Fed cuts” or “SOL is above two hundred dollars.” But there is no single asset for “the Fed cuts and SOL is above two hundred.” cc-token creates that joint claim on Solana from one collateral deposit.",
     body: (
       <div className="flex h-full flex-col justify-center">
         <div className="flex items-center gap-4">
@@ -80,7 +89,7 @@ const SLIDES: readonly Slide[] = [
   {
     title: "Two markets cannot tell you how two events are linked",
     notes:
-      "Two prediction markets. One says the Fed has a 50% chance of cutting rates. The other says SOL has a 40% chance of finishing above $200. A question neither can answer: if the Fed cuts, does SOL go up? The chance of both could be 20% or 35%, and those two markets look exactly the same either way. Today you cannot buy “both happen” as one asset. You buy two separate bets, tie up twice the capital, and still get paid when only one comes true.",
+      "Suppose separate markets imply fifty percent for a Fed cut and forty percent for SOL above two hundred. Those numbers do not price the combination. If the events were independent, it would be twenty percent. If they are correlated, it could be thirty-five. Buying both separate claims is different, because one can still pay when only one event occurs. The joint outcome needs its own position and price.",
     body: (
       <div className="flex flex-col gap-8">
         <div className="grid grid-cols-2 gap-6">
@@ -112,7 +121,7 @@ const SLIDES: readonly Slide[] = [
   {
     title: "Deposit once. Hold every combination.",
     notes:
-      "cc-token is a Solana program for combinatorial conditional tokens. You deposit collateral once and split it across questions. Deposit 100, split on the Fed, split again on SOL, and you hold four positions, one per combination. Exactly one of them will pay out, so together they are always worth your 100. Each one is an asset you can hold, send, or wrap as an ordinary token. And now “Fed cuts and SOL above $200” has its own price.",
+      "With cc-token, I deposit 100 tokens and split them by the Fed result. I then split each claim by the SOL result. That creates four outcome positions. The matching position pays after resolution, while the complete set stays backed by the original 100. Each position has one fixed ID, whatever order it is built in, and can be held in the program or wrapped as a Token-2022 token.",
     body: (
       <div className="flex flex-col items-center gap-3 text-xl">
         <div className="rounded-xl border border-line bg-panel px-8 py-3 text-center">
@@ -139,9 +148,49 @@ const SLIDES: readonly Slide[] = [
     ),
   },
   {
+    title: "Who does what",
+    notes:
+      "Three roles: a resolver prepares and reports each question, a creator deposits and keeps the pieces it believes in, holders receive or buy the rest, and the program holds the collateral with no admin.",
+    body: (
+      <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-[10rem_repeat(3,minmax(0,1fr))] gap-3 text-2xl">
+          <div />
+          {ACTORS.map((actor) => (
+            <div key={actor} className="px-1 font-semibold text-accent">
+              {actor}
+            </div>
+          ))}
+          {WORKFLOW.map(({ phase, cells }) => (
+            <Fragment key={phase}>
+              <div className="self-center text-xl text-muted">{phase}</div>
+              {cells.map((cell, index) =>
+                cell === null ? (
+                  <div
+                    key={index}
+                    className="rounded-xl border border-dashed border-line opacity-40"
+                  />
+                ) : (
+                  <div
+                    key={index}
+                    className="rounded-xl border border-line bg-panel px-5 py-4 font-medium"
+                  >
+                    {cell}
+                  </div>
+                ),
+              )}
+            </Fragment>
+          ))}
+        </div>
+        <div className="rounded-xl border border-accent bg-accent-soft px-5 py-4 text-center text-2xl font-medium">
+          Program vault · no admin
+        </div>
+      </div>
+    ),
+  },
+  {
     title: `Live on ${CLUSTER.name}`,
     notes:
-      "This is the program live on devnet. Scenarios are published on-chain, so anyone can find them. I open “Fed cut and SOL above $200”. The page tells me what the position pays on. I deposit 100 and click once. Two transactions, one per question. The graph shows what happened: my deposit became “cut” and “no cut”, and “cut” became “SOL above 200” and “SOL below 200”. I hold the one I wanted, and the others are still mine to send or sell. Now I wrap it. It is in my wallet as a normal token, with a name the program wrote on-chain. Any wallet or exchange on Solana can hold it without knowing anything about us. Someone who receives it opens our app and sees which questions it belongs to. And when the results are in, they redeem it for the collateral.",
+      "This is the deployed program on devnet. I'll open a scenario read straight from the chain. [Open the prepared scenario.] The scenario defines the featured position: the Fed cuts and SOL finishes at or above two hundred dollars. The graph rebuilds both questions from their on-chain definitions. [Enter the amount and click Get this position.] The first confirmed split creates the Fed outcomes. The second refines the cut outcome into the two SOL outcomes. I now hold the joint position I selected, while the complementary positions remain in my graph and keep the deposit fully backed. [If time and devnet permit: select the featured box, open Wrap / Unwrap and wrap one share.] Wrapping escrows one share and mints one Token-2022 token for this position. Existing wallets and exchanges can hold it without knowing anything about cc-token. It can be unwrapped back into shares at any time, to merge or redeem.",
     body: (
       <div className="grid grid-cols-[1fr_auto] items-center gap-12">
         <ol className="flex flex-col gap-5 text-2xl">
@@ -177,7 +226,7 @@ const SLIDES: readonly Slide[] = [
   {
     title: "How it compares",
     notes:
-      "With separate markets, “A and B” is two bets and two stakes, and you are still paid when only one happens. Here it is one asset from one deposit, and it pays nothing unless both happen. A question can have many results, and any group of them is one position, so a price range needs no new market. The idea comes from Gnosis’ conditional tokens on Ethereum, which Polymarket is built on, although its markets each cover a single question. We bring the combined positions to Solana and make each one a standard token.",
+      "Compared with isolated markets, cc-token makes “A and B” one asset backed by one deposit. Multi-outcome questions and grouped ranges use the same primitive. The model comes from Gnosis conditional tokens on Ethereum; we bring combined positions to Solana as standard tokens. The protocol provides the conditional asset layer; a market maker can price and trade those assets above it.",
     body: (
       <div className="flex flex-col gap-8">
         <table className="w-full text-left text-2xl">
@@ -204,7 +253,7 @@ const SLIDES: readonly Slide[] = [
   {
     title: "What is real, and what is next",
     notes:
-      "Everything you saw is deployed: the program, a TypeScript SDK, and this app, tested end to end on a local validator and on devnet. What we do not have is a market. We are the asset layer; the next step is an exchange for wrapped positions, so the price of “both happen” is something you can read off a chart.",
+      "The Anchor program, TypeScript SDK and web application are deployed and tested on devnet. The next layer is exchange liquidity for the wrapped positions. cc-token gives Solana a general, fully backed representation for claims on combinations of outcomes.",
     body: (
       <div className="grid grid-cols-2 gap-8 text-2xl">
         <Card>
@@ -248,7 +297,7 @@ const SLIDES: readonly Slide[] = [
   {
     title: "Backup: results can be shared, not only won or lost",
     notes:
-      "A result does not have to be all or nothing. The resolver reports weights. Take one question: where does SOL settle between $100 and $300? It has two results, high and low. If SOL settles at $250, three quarters of the way up, the resolver reports 75 to high and 25 to low. A hundred shares of high pay 75, a hundred of low pay 25, and together they still pay exactly the 100 that was deposited. That is a payout that follows a price, built from the same two instructions. And it combines like any other question: “the Fed cuts, and high” pays 75 only if the Fed cut.",
+      "Results don't have to be all or nothing: the resolver can report weights. Take one question, where SOL settles between $100 and $300, with two results, high and low. If it settles at $250, three quarters of the way up, the resolver reports 75 for high and 25 for low. A hundred shares of high pay 75, a hundred of low pay 25: still exactly the 100 deposited. That's a payout that tracks a price, from the same instructions, and it combines like any question: “the Fed cuts, and high” pays 75 only if the Fed cut.",
     body: (
       <div className="flex flex-col gap-8">
         <Card>
@@ -294,7 +343,7 @@ const SLIDES: readonly Slide[] = [
     title: "Backup: ask the same question twice for a curved payout",
     compact: true,
     notes:
-      "Once results are weights, a question can be used twice on purpose. Take an RPC provider that posts a bond against downtime. One question: what share of the month was the service down? If it was down a quarter of the month, “down” gets weight 25 and “up” gets 75. A position on “down” pays 25. A position on “down and down”, the same question applied twice, pays 25% of 25%, which is 6.25. So the payout is the square of the downtime: small outages cost almost nothing, large ones cost a lot. Four split paths collapse into three positions because “down and up” is the same position as “up and down”. It receives 100 shares from each path, so 200 shares pay 37.5 in total and all three positions still pay the 100 deposited. The same construction gives any payout that is a power of a reported fraction.",
+      "With weights, you can ask the same question twice on purpose. Say an RPC provider posts a bond against downtime, and the question is what share of the month the service was down. If it was down a quarter of the month, “down” gets 25 and “up” gets 75. A hundred shares of “down” pay 25; a hundred of “down and down” pay 25% of 25%, so 6.25. The payout is the square of the downtime: small outages cost almost nothing, big ones cost a lot. “Down and up” is the same position as “up and down”, so the four split paths give three positions: its 200 shares pay 37.5, and the three still pay the 100 deposited. Repeating the question again gives higher powers.",
     body: (
       <div className="flex flex-col gap-4">
         <Card compact>
@@ -356,7 +405,7 @@ const SLIDES: readonly Slide[] = [
   {
     title: "Backup: how it works",
     notes:
-      "Every position has an identifier derived from its questions and results, and it is the same in whatever order you build it. Collateral sits in a vault and can only leave by merging a full set or redeeming a result. A question can have many results, and any group of them is one position, so a price range needs no new oracle question.",
+      "Each position's ID comes from its questions and results, and it's the same whatever order you build it in. Collateral sits in a vault and only leaves through a full-set merge or a redemption. And any group of results on a question is one position, so a price range needs no new oracle question.",
     body: (
       <div className="flex flex-col gap-8">
         <div className="grid grid-cols-3 gap-5 text-xl">

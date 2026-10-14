@@ -27,6 +27,7 @@ import {
   parsePayoutWeight,
   parseTokenAmount,
   repetition,
+  simulateRedemption,
   subtractIndexSet,
   toHex,
   type Collateral,
@@ -52,6 +53,8 @@ export type Actions = Readonly<{
     market: Market,
   ) => void;
   redeem: (key: string, factorIndex: number) => void;
+  // Every question of a settled position, last one first, down to collateral.
+  redeemAll: (key: string) => void;
   report: (conditionKey: string, numerators: readonly bigint[]) => void;
   // Only on the live page: exchange native shares for the position's token, and back.
   wrap?: (key: string, amount: bigint) => void;
@@ -332,12 +335,22 @@ export function NodeActions(props: Workspace & { node: PositionNode | null }) {
 
   const held = balanceOf(ledger, node.key);
   const wrappedAmount = props.wrapped?.get(node.key)?.amount ?? 0n;
+  // Last question first: what is left is then the box this one was split from.
   const redeemable = node.factors
     .map((factor, index) => ({
       index,
       condition: findCondition(conditions, factor.conditionId),
     }))
-    .filter(({ condition }) => resolutions[condition.key]);
+    .filter(({ condition }) => resolutions[condition.key])
+    .reverse();
+  const cashOut =
+    node.factors.length > 1 && redeemable.length === node.factors.length
+      ? simulateRedemption(
+          [...node.factors].reverse(),
+          (conditionId) => resolutions[findCondition(conditions, conditionId).key]!,
+          held,
+        ).at(-1)!.output
+      : null;
 
   return (
     <div className="nodrag nopan flex flex-col items-center">
@@ -412,6 +425,14 @@ export function NodeActions(props: Workspace & { node: PositionNode | null }) {
         panel(
           "A reported result settles one question at a time. Redeeming removes that question and leaves what it paid.",
           <div className="flex flex-col gap-2">
+            {cashOut !== null && (
+              <ActionButton
+                tone="good"
+                label={`Redeem all for ${formatTokenAmount(cashOut, decimals)} ${symbol}`}
+                note={`Settles the ${node.factors.length} questions in turn, last one first.`}
+                onClick={() => actions.redeemAll(node.key)}
+              />
+            )}
             {redeemable.map(({ index, condition }) => {
               const step = redemption(ledger, node.key, index, resolutions[condition.key]!);
               return (

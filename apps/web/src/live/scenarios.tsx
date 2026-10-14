@@ -207,7 +207,8 @@ export function LiveScenarioDiscovery(props: { owner?: Address }) {
 export function LiveScenarioDetail(props: {
   addressText: string;
   owner?: Address;
-  workspace?: (entry: ScenarioEntry) => ReactNode;
+  // `onState` reports the scenario's resolution as the graph reads it after each transaction.
+  workspace?: (entry: ScenarioEntry, onState: (state: ScenarioState) => void) => ReactNode;
 }) {
   const graphed = props.workspace !== undefined;
   const [renaming, setRenaming] = useState(false);
@@ -219,6 +220,8 @@ export function LiveScenarioDetail(props: {
   }> | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  // Newer than the state read with the scenario once results are reported from the graph.
+  const [liveState, setLiveState] = useState<ScenarioState | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -332,6 +335,7 @@ export function LiveScenarioDetail(props: {
   if (!detail) return <Panel title="Scenario">Reading the scenario from devnet…</Panel>;
 
   const { scenario, participation, label, names } = detail;
+  const state = liveState ?? scenario.state;
   return (
     <div className="flex flex-col gap-4">
       {graphed ? (
@@ -339,7 +343,7 @@ export function LiveScenarioDetail(props: {
         <div className="rounded-lg border border-line bg-panel px-4 py-2 text-sm">
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <h1 className="text-base font-semibold">{scenario.definition.data.name}</h1>
-            <span className="text-muted capitalize">{scenario.state.replace("_", " ")}</span>
+            <span className="text-muted capitalize">{state.replace("_", " ")}</span>
             <span className="text-muted" title={scenario.definition.data.creator}>
               by{" "}
               <span className="font-mono text-xs">{shorten(scenario.definition.data.creator)}</span>
@@ -368,7 +372,7 @@ export function LiveScenarioDetail(props: {
       ) : (
         <Panel title={scenario.definition.data.name}>
           <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <Datum label="State" value={scenario.state.replace("_", " ")} />
+            <Datum label="State" value={state.replace("_", " ")} />
             <Datum
               label="Collateral"
               value={
@@ -406,7 +410,7 @@ export function LiveScenarioDetail(props: {
         </Panel>
       )}
       {props.workspace && entry ? (
-        props.workspace(entry)
+        props.workspace(entry, setLiveState)
       ) : (
         <Panel
           title="Featured claim path"
@@ -428,6 +432,8 @@ export function LiveScenarioDetail(props: {
     </div>
   );
 }
+
+type ScenarioState = VerifiedScenario["state"];
 
 function ScenarioPreview(props: {
   scenario: VerifiedScenario;

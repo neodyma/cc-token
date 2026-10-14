@@ -79,6 +79,14 @@ function WalletMenu() {
   const dialog = useRef<HTMLDialogElement>(null);
   const connected = useConnectedWallet(client);
   const close = () => dialog.current?.close();
+  // Connecting replaces the wallet list with the account details before the connect call
+  // returns, which ends that call in the unmounted list. Close when an account appears instead.
+  const address = connected?.account.address;
+  const previous = useRef(address);
+  useEffect(() => {
+    if (address !== undefined && address !== previous.current) close();
+    previous.current = address;
+  }, [address]);
 
   return (
     <>

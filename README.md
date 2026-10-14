@@ -58,7 +58,8 @@ is recorded as issuer-controlled and requires explicit acceptance before deposit
 - **Simulator** runs an in-browser position graph and simulated market without transactions.
 - **Live** discovers named scenarios from program accounts and uses the deployed devnet program.
   It supports scenario creation, deposit, split, merge, native transfer, wrap, unwrap, resolution
-  and redemption. Scenario graphs are readable without a wallet.
+  and redemption. A scenario can be backed by wrapped SOL, which the page wraps and unwraps.
+  Scenario graphs are readable without a wallet.
 
 Run it locally:
 

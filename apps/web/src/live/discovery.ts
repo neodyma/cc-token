@@ -43,6 +43,8 @@ import {
   getMetadataAddress,
   inBatches,
   METADATA_PROGRAM_ADDRESS,
+  WRAPPED_SOL_LABEL,
+  WRAPPED_SOL_MINT,
   type CollateralRef,
   type LiveClient,
 } from "./chain.ts";
@@ -62,6 +64,8 @@ export type LiveCollateral = CollateralRef &
     free: bigint;
     // Whether the wallet can mint more, as it can for a test token made on this page.
     mintable: boolean;
+    // For wrapped SOL, the wallet's SOL that could be wrapped; null for every other token.
+    sol: bigint | null;
     // From the token's metadata account, when it has one.
     label: TokenLabel | null;
   }>;
@@ -183,6 +187,10 @@ export async function fetchTokenLabels(
     const label = decodeTokenLabel(account.data, mints[index]!);
     if (label) labels.set(mints[index]!, label);
   });
+  // Wrapped SOL has no metadata account on every cluster, and everyone knows it by this name.
+  if (mints.includes(WRAPPED_SOL_MINT) && !labels.has(WRAPPED_SOL_MINT)) {
+    labels.set(WRAPPED_SOL_MINT, WRAPPED_SOL_LABEL);
+  }
   return labels;
 }
 
@@ -201,9 +209,10 @@ export async function fetchCollateral(
     getCollateralAddress(mint),
     findAssociatedTokenPda({ owner, tokenProgram, mint }),
   ]);
-  const [registration, token] = await Promise.all([
+  const [registration, token, wallet] = await Promise.all([
     generatedClient.fetchMaybeCollateralConfig(rpc, configAddress, config),
     fetchMaybeToken(rpc, ata, config),
+    mint === WRAPPED_SOL_MINT ? fetchEncodedAccounts(rpc, [owner], config) : null,
   ]);
   const { mintAuthority, freezeAuthority, decimals } = account.data;
   return {
@@ -214,6 +223,7 @@ export async function fetchCollateral(
     registered: registration.exists,
     free: token.exists ? token.data.amount : 0n,
     mintable: isSome(mintAuthority) && mintAuthority.value === owner,
+    sol: wallet ? (wallet[0]!.exists ? wallet[0]!.lamports : 0n) : null,
     label: (await fetchTokenLabels(rpc, [mint], config)).get(mint) ?? null,
   };
 }

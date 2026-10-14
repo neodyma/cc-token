@@ -110,11 +110,12 @@ export function Live(props: { route: string }) {
           owner={connected?.account.address as Address | undefined}
           {...(connected
             ? {
-                workspace: (entry) => (
+                workspace: (entry, onState) => (
                   <LiveWorkspace
                     key={`${connected.account.address}:${scenarioAddress}:${entry.name}`}
                     owner={connected.account.address as Address}
                     scenario={entry}
+                    onScenarioState={onState}
                   />
                 ),
               }

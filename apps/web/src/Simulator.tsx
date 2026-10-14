@@ -239,6 +239,26 @@ function Workspace(props: { scenario: Scenario; onSelectScenario: (key: string) 
         }.`,
       );
     },
+    redeemAll: (key) => {
+      const node = ledger.nodes.find((candidate) => candidate.key === key)!;
+      const held = balanceOf(ledger, key);
+      let paid = 0n;
+      const done = apply(() => {
+        let next = ledger;
+        for (let depth = node.factors.length; depth > 0; depth -= 1) {
+          const at = holdingKey(node.factors.slice(0, depth));
+          if (balanceOf(next, at) === 0n) break;
+          next = redeem(next, at, depth - 1, resolved(node.factors[depth - 1]!)!);
+        }
+        paid = next.portfolio.collateral - ledger.portfolio.collateral;
+        return next;
+      });
+      if (done) {
+        log(
+          `Redeemed ${amountOf(held)} shares of ${nameOf(node.factors)} and received ${tokens(paid)}.`,
+        );
+      }
+    },
     report: (conditionKey, numerators) => {
       if (Object.keys(resolutions).length === 0) setUnresolved({ ledger, history });
       setResolutions({ ...resolutions, [conditionKey]: numerators });
@@ -278,10 +298,10 @@ function Workspace(props: { scenario: Scenario; onSelectScenario: (key: string) 
     }
     return value;
   };
-  // The exact amount a holding redeems for, one floor per question.
+  // The exact amount a holding redeems for, one floor per question, last question first.
   const payoutOf = (factors: readonly ConditionClause[], amount: bigint): bigint => {
     const steps = simulateRedemption(
-      factors,
+      [...factors].reverse(),
       (conditionId) => resolutions[findCondition(conditions, conditionId).key]!,
       amount,
     );
@@ -372,7 +392,8 @@ function Workspace(props: { scenario: Scenario; onSelectScenario: (key: string) 
           (candidate) => balanceOf(next, candidate.key) > 0n && candidate.factors.some(resolved),
         );
         if (!node) return next;
-        const index = node.factors.findIndex(resolved);
+        // Last question first, so what is left stays on the tree.
+        const index = node.factors.length - 1 - [...node.factors].reverse().findIndex(resolved);
         next = redeem(next, node.key, index, resolved(node.factors[index]!)!);
       }
     });

@@ -29,6 +29,7 @@ import {
   prepareQuestion,
   publishScenario,
   redeem,
+  redeemAll,
   registerCollateral,
   reportPayouts,
   split,
@@ -36,7 +37,9 @@ import {
   TEST_TOKEN_NAME,
   transfer,
   unwrap,
+  unwrapSol,
   wrap,
+  wrapSol,
 } from "./live/chain.ts";
 import {
   fetchCollateral,
@@ -159,8 +162,10 @@ export function LiveWorkspace(props: {
   owner: Address;
   scenario?: ScenarioEntry;
   token?: Address;
+  // How many of the scenario's questions are resolved, each time the chain is read.
+  onScenarioState?: (state: "active" | "partially_resolved" | "resolved") => void;
 }) {
-  const { owner } = props;
+  const { owner, onScenarioState } = props;
   // The component is remounted for another scenario, so the first one stays for its lifetime.
   const scenario = useRef(props.scenario).current;
   const mintKey = `${STORAGE}:${owner}:mint`;
@@ -254,6 +259,15 @@ export function LiveWorkspace(props: {
     },
     [owner, questionsKey, scenario],
   );
+
+  useEffect(() => {
+    if (!scenario || !chain || !onScenarioState) return;
+    const keys = new Set(scenario.path.map((factor) => toHex(factor.conditionId)));
+    const resolved = [...keys].filter((key) => chain.conditions.get(key)?.payouts).length;
+    onScenarioState(
+      resolved === 0 ? "active" : resolved === keys.size ? "resolved" : "partially_resolved",
+    );
+  }, [scenario, chain, onScenarioState]);
 
   useEffect(() => {
     if (!mint) return;
@@ -452,14 +466,74 @@ function HeldTokens(props: { owner: Address; onOpen: (mint: Address) => void }) 
 
 // The entry to a published scenario: what its featured position is, and one action that
 // deposits and splits down to it.
+// What a wrap leaves in the wallet for the token account's rent and later fees.
+const SOL_RESERVE = 10_000_000n;
+const SOL_DECIMALS = 9;
+
+// Wrapped SOL is the deposit token; these move the wallet's SOL in and out of it.
+function WrapSol(props: {
+  sol: bigint;
+  wrapped: bigint;
+  onWrap: (amount: bigint) => void;
+  onUnwrap: () => void;
+  onFail: (message: string) => void;
+}) {
+  const [text, setText] = useState("0.1");
+  const available = props.sol > SOL_RESERVE ? props.sol - SOL_RESERVE : 0n;
+
+  function submit() {
+    const amount = attempt(() => parseTokenAmount(text, SOL_DECIMALS));
+    if (!amount.ok || amount.value <= 0n) return props.onFail("Enter an amount of SOL to wrap.");
+    if (amount.value > available) {
+      return props.onFail(
+        `You can wrap up to ${formatTokenAmount(available, SOL_DECIMALS)} SOL; the rest pays for fees.`,
+      );
+    }
+    props.onWrap(amount.value);
+  }
+
+  return (
+    <span className="flex items-center gap-2">
+      <input
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        inputMode="decimal"
+        aria-label="Amount of SOL to wrap"
+        title={`${formatTokenAmount(props.sol, SOL_DECIMALS)} SOL in your wallet`}
+        className="w-20 rounded-md border border-line bg-page px-2 py-0.5 font-mono"
+      />
+      <button type="button" onClick={submit} className="text-accent underline">
+        Wrap SOL
+      </button>
+      {props.wrapped > 0n && (
+        <button
+          type="button"
+          title="Closes the wrapped SOL account and returns all of it as SOL"
+          onClick={props.onUnwrap}
+          className="text-accent underline"
+        >
+          Unwrap all
+        </button>
+      )}
+    </span>
+  );
+}
+
 function ScenarioBanner(props: {
-  // Each question of the featured position with the results it pays on.
-  legs: readonly Readonly<{ question: string; results: string }>[];
+  // Each question of the featured position with the results it pays on, and once reported,
+  // the share of the payout those results received and the results that happened.
+  legs: readonly Readonly<{
+    question: string;
+    results: string;
+    settled?: Readonly<{ share: number; happened: string }>;
+  }>[];
   symbol: string;
   decimals: number;
   free: bigint;
   held: bigint;
   mintable: boolean;
+  // Wrapped SOL: the wallet gets more by wrapping its own SOL.
+  wrappable: boolean;
   busy: boolean;
   pendingAmount: bigint | null;
   completedSteps: number;
@@ -489,6 +563,31 @@ function ScenarioBanner(props: {
     props.onTake(amount.value);
   }
 
+  // The banner states what the position pays on; once results are reported it also says how
+  // that turned out, and stops offering the position when its value is settled.
+  const settled = props.legs.filter((leg) => leg.settled);
+  const lost = props.legs.find((leg) => leg.settled?.share === 0);
+  const final = lost !== undefined || settled.length === props.legs.length;
+  const value = props.legs.reduce((total, leg) => total * (leg.settled?.share ?? 1), 1);
+  const pending = props.legs.filter((leg) => !leg.settled).map((leg) => `“${leg.question}”`);
+  const outcome =
+    settled.length === 0
+      ? null
+      : lost
+        ? {
+            tone: "text-bad",
+            text: `It pays nothing: “${lost.question}” resolved as ${lost.settled!.happened}.`,
+          }
+        : final
+          ? {
+              tone: "text-good",
+              text: `It pays ${value === 1 ? "1" : value.toFixed(2)} ${props.symbol} per share. Redeem it from its box in the graph.`,
+            }
+          : {
+              tone: "text-muted",
+              text: `${settled.map((leg) => `“${leg.question}” resolved as ${leg.settled!.happened}`).join(" and ")}. It now depends on ${pending.join(" and ")}.`,
+            };
+
   return (
     <div className="mt-4 rounded-lg border border-accent/40 bg-page p-3 text-sm">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
@@ -496,9 +595,25 @@ function ScenarioBanner(props: {
         {props.legs.map((leg, index) => (
           <span key={index} className="flex items-center gap-2">
             {index > 0 && <span className="text-muted">and</span>}
-            <span className="rounded-md border border-line bg-panel px-2 py-0.5">
+            <span
+              className={`rounded-md border bg-panel px-2 py-0.5 ${
+                leg.settled === undefined
+                  ? "border-line"
+                  : leg.settled.share === 0
+                    ? "border-bad"
+                    : "border-good"
+              }`}
+            >
               <span className="text-muted">{leg.question}: </span>
               <span className="font-medium">{leg.results}</span>
+              {leg.settled &&
+                (leg.settled.share === 0 ? (
+                  <span className="text-bad"> ✗ was {leg.settled.happened}</span>
+                ) : leg.settled.share === 1 ? (
+                  <span className="text-good"> ✓</span>
+                ) : (
+                  <span className="text-good"> {Math.round(leg.settled.share * 100)}% paid</span>
+                ))}
             </span>
           </span>
         ))}
@@ -508,6 +623,7 @@ function ScenarioBanner(props: {
           </span>
         )}
       </div>
+      {outcome && <p className={`mt-2 font-medium ${outcome.tone}`}>{outcome.text}</p>}
       {props.pendingAmount !== null ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <p className="mr-auto text-muted">
@@ -526,12 +642,14 @@ function ScenarioBanner(props: {
             Resume position
           </button>
         </div>
-      ) : free === 0n && props.held > 0n ? null : free === 0n ? (
+      ) : final || (free === 0n && props.held > 0n) ? null : free === 0n ? (
         <p className="mt-2 text-muted">
           You have no {props.symbol} to deposit.{" "}
           {props.mintable
             ? "Mint some above."
-            : "Its issuer has to send you some, or another wallet can send you positions."}
+            : props.wrappable
+              ? "Wrap some SOL above."
+              : "Its issuer has to send you some, or another wallet can send you positions."}
         </p>
       ) : (
         <>
@@ -712,14 +830,15 @@ function Workspace(props: {
   const nameOf = (factors: readonly ConditionClause[]) => describeClaim(conditions, factors);
   const resolved = (factor: ConditionClause) =>
     resolutions[findCondition(conditions, factor.conditionId).key];
-  const payoutOf = (factors: readonly ConditionClause[], amount: bigint): bigint => {
-    const steps = simulateRedemption(
-      factors,
+  // Last question first, as "Redeem all" does it: one floor per question.
+  const redemptionSteps = (factors: readonly ConditionClause[], amount: bigint) =>
+    simulateRedemption(
+      [...factors].reverse(),
       (conditionId) => resolutions[findCondition(conditions, conditionId).key]!,
       amount,
     );
-    return steps[steps.length - 1]!.output;
-  };
+  const payoutOf = (factors: readonly ConditionClause[], amount: bigint): bigint =>
+    redemptionSteps(factors, amount).at(-1)!.output;
 
   // Offered when each question of the featured position appears once, so that it is reached
   // by one split per question.
@@ -861,6 +980,23 @@ function Workspace(props: {
         "Redeeming",
         `Redeemed ${amountOf(held)} shares of ${nameOf(node.factors)} on “${title}”.`,
         () => redeem(client, collateral, node.factors, factorIndex, held),
+      );
+    },
+    redeemAll: (key) => {
+      const node = ledger.nodes.find((candidate) => candidate.key === key);
+      if (!node) return;
+      const held = balanceOf(ledger, key);
+      const steps = redemptionSteps(node.factors, held);
+      void props.onRun(
+        "Redeeming",
+        `Redeemed ${amountOf(held)} shares of ${nameOf(node.factors)} for ${amountOf(steps.at(-1)!.output)} ${symbol}.`,
+        () =>
+          redeemAll(
+            client,
+            collateral,
+            node.factors,
+            steps.map((step) => step.input),
+          ),
       );
     },
     report: (conditionKey, numerators) => {
@@ -1030,6 +1166,25 @@ function Workspace(props: {
                 Mint {TEST_TOKEN.grant} more
               </button>
             )}
+            {collateral.sol !== null && (
+              <WrapSol
+                sol={collateral.sol}
+                wrapped={collateral.free}
+                onWrap={(amount) =>
+                  void props.onRun("Wrapping SOL", `Wrapped ${amountOf(amount)} SOL.`, () =>
+                    wrapSol(client, amount),
+                  )
+                }
+                onUnwrap={() =>
+                  void props.onRun(
+                    "Unwrapping SOL",
+                    `Unwrapped ${amountOf(collateral.free)} SOL.`,
+                    () => unwrapSol(client),
+                  )
+                }
+                onFail={props.onFail}
+              />
+            )}
             {collateral.mintable && !collateral.label && (
               <button
                 type="button"
@@ -1059,11 +1214,25 @@ function Workspace(props: {
           <ScenarioBanner
             legs={featuredPath.map((factor) => {
               const condition = findCondition(conditions, factor.conditionId);
+              const payouts = resolutions[condition.key];
+              const ratio = payouts && payoutRatio(payouts, factor.indexSet);
               return {
                 question: condition.title,
                 results: outcomesInIndexSet(factor.indexSet, factor.outcomeCount)
                   .map((outcome) => condition.outcomes[outcome]!)
                   .join(" or "),
+                ...(payouts && ratio
+                  ? {
+                      settled: {
+                        share: Number(ratio.numerator) / Number(ratio.denominator),
+                        happened: payouts
+                          .flatMap((payout, outcome) =>
+                            payout > 0n ? [condition.outcomes[outcome]!] : [],
+                          )
+                          .join(" and "),
+                      },
+                    }
+                  : {}),
               };
             })}
             symbol={symbol}
@@ -1075,6 +1244,7 @@ function Workspace(props: {
               )?.amount ?? 0n
             }
             mintable={collateral.mintable}
+            wrappable={collateral.sol !== null}
             busy={props.busy !== null}
             pendingAmount={pendingAcquisition === null ? null : BigInt(pendingAcquisition.amount)}
             completedSteps={completedAcquisitionSteps}

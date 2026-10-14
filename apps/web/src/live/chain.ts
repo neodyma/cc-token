@@ -44,9 +44,11 @@ import {
 } from "@cc-token/sdk";
 import {
   findAssociatedTokenPda,
+  getCloseAccountInstruction,
   getCreateAssociatedTokenIdempotentInstruction,
   getCreateMintInstructionPlan,
   getMintToInstruction,
+  getSyncNativeInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 import {
@@ -355,6 +357,59 @@ export async function mintTestCollateral(
       { mint: collateral.mint, token: ata, mintAuthority: client.payer, amount },
       { programAddress: collateral.tokenProgram },
     ),
+  ]);
+}
+
+// SOL as a token: a classic SPL account of this mint holds lamports and reports them as its
+// balance. It is the one collateral every wallet on a cluster already has the means to get.
+export const WRAPPED_SOL_MINT = address("So11111111111111111111111111111111111111112");
+export const WRAPPED_SOL_LABEL = { name: "Wrapped SOL", symbol: "SOL" } as const;
+const WRAPPED_SOL: CollateralRef = {
+  mint: WRAPPED_SOL_MINT,
+  tokenProgram: TOKEN_PROGRAM_ADDRESS,
+  issuerControlled: false,
+};
+
+// System program Transfer, written out by hand to avoid a dependency for one instruction.
+function getTransferSolInstruction(
+  source: TransactionSigner,
+  destination: Address,
+  amount: bigint,
+): Instruction {
+  const data = new Uint8Array(12);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 2, true); // Transfer
+  view.setBigUint64(4, amount, true);
+  return {
+    programAddress: address("11111111111111111111111111111111"),
+    accounts: [
+      { address: source.address, role: AccountRole.WRITABLE_SIGNER, signer: source },
+      { address: destination, role: AccountRole.WRITABLE },
+    ],
+    data,
+  } as Instruction;
+}
+
+// Moves SOL into the wallet's wrapped SOL account, where it can be deposited like any token.
+export async function wrapSol(client: LiveClient, amount: bigint): Promise<readonly Signature[]> {
+  const { ata, create } = await ownerTokenAccount(client, WRAPPED_SOL);
+  return send(client, [
+    create,
+    getTransferSolInstruction(client.payer, ata, amount),
+    getSyncNativeInstruction({ account: ata }),
+  ]);
+}
+
+// Closes the wrapped SOL account, which returns all of it and the account's rent as SOL. The
+// token program has no way to unwrap only a part.
+export async function unwrapSol(client: LiveClient): Promise<readonly Signature[]> {
+  const { ata } = await ownerTokenAccount(client, WRAPPED_SOL);
+  return send(client, [
+    getCloseAccountInstruction({
+      account: ata,
+      destination: client.payer.address,
+      owner: client.payer,
+    }),
   ]);
 }
 
@@ -698,6 +753,34 @@ export async function redeem(
   factorIndex: number,
   amount: bigint,
 ): Promise<readonly Signature[]> {
+  return send(client, await redeemInstructions(client, collateral, factors, factorIndex, amount));
+}
+
+// Settles every question of a position, last one first, so each step leaves the position it
+// was split from. `amounts` is what each step redeems, starting with the shares held.
+export async function redeemAll(
+  client: LiveClient,
+  collateral: CollateralRef,
+  factors: readonly ConditionClause[],
+  amounts: readonly bigint[],
+): Promise<readonly Signature[]> {
+  const instructions: Instruction[] = [];
+  for (let depth = factors.length; depth > 0; depth -= 1) {
+    const amount = amounts[factors.length - depth]!;
+    if (amount === 0n) break;
+    const prefix = factors.slice(0, depth);
+    instructions.push(...(await redeemInstructions(client, collateral, prefix, depth - 1, amount)));
+  }
+  return send(client, instructions);
+}
+
+async function redeemInstructions(
+  client: LiveClient,
+  collateral: CollateralRef,
+  factors: readonly ConditionClause[],
+  factorIndex: number,
+  amount: bigint,
+): Promise<readonly Instruction[]> {
   const owner = client.payer;
   const factor = factors[factorIndex];
   if (!factor) throw new RangeError("unknown position");
@@ -713,14 +796,14 @@ export async function redeem(
 
   if (residual.length === 0) {
     const { ata, create } = await ownerTokenAccount(client, collateral);
-    return send(client, [
+    return [
       create,
       await getRedeemRootCollateralInstruction({
         ...input,
         ownerTokenAccount: ata,
         tokenProgram: collateral.tokenProgram,
       }),
-    ]);
+    ];
   }
 
   const parentCollectionId = collectionIdOf(residual);
@@ -732,10 +815,10 @@ export async function redeem(
       parentCollectionId,
     })),
   ];
-  return send(client, [
+  return [
     ...(await withoutExisting(client, setup)),
     await getRedeemNativePositionInstruction({ ...input, parentCollectionId }),
-  ]);
+  ];
 }
 
 // Exchanges native shares for the position's Token-2022 token, one for one. The first wrap of

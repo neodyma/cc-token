@@ -25,13 +25,19 @@ import {
   prepareQuestion,
   publishScenario,
   redeem,
+  redeemAll,
+  registerCollateral,
   reportPayouts,
   renameScenario,
   split,
   takePosition,
   transfer,
   unwrap,
+  unwrapSol,
   wrap,
+  WRAPPED_SOL_LABEL,
+  WRAPPED_SOL_MINT,
+  wrapSol,
 } from "../src/live/chain.ts";
 import {
   fetchCollateral,
@@ -381,14 +387,18 @@ test("the live page's transactions run the whole lifecycle", async () => {
   assert.deepEqual(resolved.get(weather.key)?.payouts, [0n, 0n, 1n]);
   assert.deepEqual(resolved.get(launch.key)?.payouts, [1n, 3n]);
 
+  // "Redeem all" settles the last question first, through the position it was split from.
+  const before = await free();
+  await redeemAll(client, collateral, [snow, onTime], [70n * UNIT, (70n * UNIT) / 4n]);
+  assert.equal(await held([snow, onTime]), 0n);
+  assert.equal(await held([snow]), 0n);
+  assert.equal(await free(), before + (70n * UNIT) / 4n);
+
   // Redeem one question at a time. Redeeming the weather first leaves a position on the
   // launch alone, whose collection nobody registered before.
-  await redeem(client, collateral, [snow, onTime], 1, 70n * UNIT);
-  assert.equal(await held([snow]), (70n * UNIT) / 4n);
   await redeem(client, collateral, [snow, late], 0, 70n * UNIT);
   assert.equal(await held([late]), 70n * UNIT);
   await redeem(client, collateral, [late], 0, 70n * UNIT);
-  await redeem(client, collateral, [snow], 0, (70n * UNIT) / 4n);
   await redeem(client, collateral, [dry], 0, 60n * UNIT);
   assert.equal(await free(), 1_000n * UNIT);
   assert.ok([...(await balances()).values()].every((amount) => amount === 0n));
@@ -428,4 +438,47 @@ test("the live page's transactions run the whole lifecycle", async () => {
   assert.equal(await held([sun]), 0n);
   await clearTakePositionCheckpoints(owner, created.mint, [sun, onTime], 5n * UNIT, takeOptions);
   assert.equal(stored.size, 0);
+});
+
+test("wrapped SOL is registered and deposited like any other token", async () => {
+  const client = await fundedClient();
+  const owner = client.payer.address;
+  const SOL = 1_000_000_000n;
+  const read = () => fetchCollateral(client.rpc, owner, WRAPPED_SOL_MINT);
+
+  const unregistered = await read();
+  assert.equal(unregistered.mintable, false);
+  assert.equal(unregistered.issuerControlled, false);
+  assert.equal(unregistered.decimals, 9);
+  assert.equal(unregistered.free, 0n);
+  assert.deepEqual(unregistered.label, WRAPPED_SOL_LABEL);
+  assert.ok(unregistered.sol !== null && unregistered.sol > SOL);
+  // Another test may have registered the mint on this validator; registering is idempotent.
+  await registerCollateral(client, unregistered);
+
+  await wrapSol(client, SOL / 2n);
+  const collateral = await read();
+  assert.equal(collateral.registered, true);
+  assert.equal(collateral.free, SOL / 2n);
+  // Wrapping again adds to the same account.
+  await wrapSol(client, SOL / 4n);
+  assert.equal((await read()).free, (SOL * 3n) / 4n);
+
+  const rain = toCondition(newQuestion(owner, "Rain", ["yes", "no"], "sol"));
+  await prepareQuestion(client, rain.questionId, 2);
+  const rainRef = { conditionId: rain.conditionId, outcomeCount: 2 };
+  const halves = [indexSetFromOutcomes([0]), indexSetFromOutcomes([1])];
+  await split(client, collateral, [], rainRef, halves, SOL / 2n);
+  assert.equal((await read()).free, SOL / 4n);
+
+  // Unwrapping closes the account and returns everything in it as SOL.
+  const before = (await read()).sol!;
+  await unwrapSol(client);
+  const unwrapped = await read();
+  assert.equal(unwrapped.free, 0n);
+  assert.ok(unwrapped.sol! > before + SOL / 4n - 1_000_000n);
+
+  // A merge pays into the account again, creating it when it was closed.
+  await merge(client, collateral, [], rainRef, halves, SOL / 2n);
+  assert.equal((await read()).free, SOL / 2n);
 });

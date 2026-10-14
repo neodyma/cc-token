@@ -140,6 +140,8 @@
 - [x] Scenario pages open as read-only or connected graphs; scenario creation accepts new, known and pasted collateral mints
 - [x] Scenario graphs exclude unrelated positions while shared positions remain compatible with multiple scenarios
 - [x] Featured-position acquisition resumes confirmed splits without depositing twice
+- [x] Wrapped SOL as collateral: wrap and unwrap controls on the Live page (local validator)
+- [x] "Redeem all" settles a resolved position last question first, down to collateral (local validator, simulator)
 - [ ] Live page exercised end to end from a browser wallet on devnet
 - [ ] Native/compressed balance breakdown
 - [x] Optional advanced multiplicative construction
