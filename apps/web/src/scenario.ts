@@ -356,9 +356,12 @@ export function repetition(
 
 // How a box in the graph is headed. A position that uses a question twice is named in full,
 // because it is not the plain claim on its last selection.
+// `standalone`: the box it was split from is not on the graph, as for a position received
+// alone, so the box names every condition instead of only the last one.
 export function boxLabel(
   conditions: readonly DemoCondition[],
   factors: readonly ConditionClause[],
+  standalone = false,
 ): Readonly<{ context: string; title: string }> {
   const narrowed = factors[factors.length - 1]!;
   const given = factors.slice(0, -1);
@@ -368,6 +371,16 @@ export function boxLabel(
     return {
       context: repeated === "exclusive" ? "pays only on a shared result" : "same question twice",
       title: describeClaim(conditions, factors),
+    };
+  }
+  if (standalone && given.length > 0) {
+    return {
+      context: `${factors.length} questions`,
+      title: factors
+        .map((factor) =>
+          describeSubset(findCondition(conditions, factor.conditionId), factor.indexSet),
+        )
+        .join(" & "),
     };
   }
   return {

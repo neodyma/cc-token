@@ -252,8 +252,11 @@ export function LiveWorkspace(props: {
         }
       }
       setUnread(failed);
-      if (found.length === 0) return;
-      questions.current = [...questions.current, ...found];
+      // Two refreshes close together can both look up the same question.
+      const stored = new Set(questions.current.map((question) => toCondition(question).key));
+      const added = found.filter((question) => !stored.has(toCondition(question).key));
+      if (added.length === 0) return;
+      questions.current = [...questions.current, ...added];
       saveQuestions(localStorage, questionsKey, questions.current);
       setChain({ ...state });
     },
@@ -749,10 +752,13 @@ function Workspace(props: {
 
   // Questions this browser named and that exist on-chain, then any others found in positions.
   const known = useMemo(() => {
-    const named = props.questions
-      .map(toCondition)
-      .filter((condition) => chain.conditions.has(condition.key));
-    const keys = new Set(named.map((condition) => condition.key));
+    // A question saved twice by an earlier version is listed once.
+    const keys = new Set<string>();
+    const named = props.questions.map(toCondition).filter((condition) => {
+      if (!chain.conditions.has(condition.key) || keys.has(condition.key)) return false;
+      keys.add(condition.key);
+      return true;
+    });
     const others = [...chain.conditions.values()]
       .map(unnamedCondition)
       .filter((condition) => !keys.has(condition.key));
@@ -1060,7 +1066,12 @@ function Workspace(props: {
             : null;
       return {
         key: node.key,
-        ...boxLabel(conditions, node.factors),
+        ...boxLabel(
+          conditions,
+          node.factors,
+          ledger.edges.find((edge) => edge.to === node.key)?.from !==
+            holdingKey(node.factors.slice(0, -1)),
+        ),
         amount:
           inToken > 0n
             ? `${amountOf(held)} sh + ${amountOf(inToken)} wrapped`

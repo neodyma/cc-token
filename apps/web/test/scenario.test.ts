@@ -343,6 +343,11 @@ test("different questions are still headed by the last one, given the others", (
     context: "given (approved)",
     title: "$200 or more",
   });
+  // Received alone, without the box it was split from, it names every condition.
+  assert.deepEqual(boxLabel(governance, factors, true), {
+    context: "2 questions",
+    title: "approved & $200 or more",
+  });
   assert.match(claimStatement(governance, factors), /, and /);
 });
 

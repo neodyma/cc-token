@@ -336,7 +336,12 @@ function Workspace(props: { scenario: Scenario; onSelectScenario: (key: string) 
               : null;
       return {
         key: node.key,
-        ...boxLabel(conditions, node.factors),
+        ...boxLabel(
+          conditions,
+          node.factors,
+          ledger.edges.find((edge) => edge.to === node.key)?.from !==
+            holdingKey(node.factors.slice(0, -1)),
+        ),
         amount: `${formatTokenAmount(held, decimals)} sh`,
         detail: marketOpen
           ? `${Math.round(priceOf(node.factors) * 100)}¢`

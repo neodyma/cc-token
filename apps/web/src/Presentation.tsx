@@ -76,8 +76,33 @@ function Box(props: { label: string; featured?: boolean }) {
   );
 }
 
+// "Yes" and "No" cells render as a green check and a red cross.
+function ComparisonCell(props: Readonly<{ value: string }>) {
+  if (props.value === "Yes") {
+    return (
+      <span className="font-semibold text-good" aria-label="Yes">
+        ✓
+      </span>
+    );
+  }
+  if (props.value === "No") {
+    return (
+      <span className="font-semibold text-bad" aria-label="No">
+        ✗
+      </span>
+    );
+  }
+  return <>{props.value}</>;
+}
+
 const COMPARISON: readonly (readonly [string, string, string, string])[] = [
   ["What can be combined", "Nothing", "What the platform lists", "Any questions, any results"],
+  [
+    "Outcomes covered",
+    "2 per market",
+    "Up to 50 binary legs",
+    "256ⁿ: n questions, up to 256 results each",
+  ],
   ["Who creates it", "—", "The platform's market makers", "Anyone, from one deposit"],
   ["If only A happens", "One bet still pays", "Pays nothing", "Pays nothing"],
   ["Results by share", "No", "No", "Yes"],
@@ -85,55 +110,64 @@ const COMPARISON: readonly (readonly [string, string, string, string])[] = [
 ];
 
 // What the demo video shows, the second each step starts at, and what to say over it.
-type DemoStep = Readonly<{ step: string; detail: string; start: number; say: string }>;
+type DemoStep = Readonly<{
+  step: string;
+  detail: string;
+  start: number;
+  say: string;
+  // Not needed to settle a position: only to trade it as a token.
+  optional?: boolean;
+}>;
 const DEMO_STEPS: readonly DemoStep[] = [
   {
     step: "Create",
     detail: "Two questions, one featured combination",
     start: 0,
-    say: "Wallet A creates a scenario: / two questions, the Fed and the SOL price, / and the combination it features.",
+    say: "Alice creates a scenario: / two questions, the Fed and the SOL price, / and the combination it features.",
   },
   {
     step: "Take",
     detail: "Deposit 100, one split per question",
     start: 8.8,
-    say: "It deposits 100 and splits once per question. / Together, the pieces are always worth the scenario's collateral.",
+    say: "She deposits a hundred and splits once per question. / Together, the pieces are always worth the scenario's collateral.",
   },
   {
     step: "Send",
-    detail: "25 shares to a wallet with no setup",
+    detail: "25 shares to Bob, no setup needed",
     start: 18.3,
-    say: "It sends 25 shares to wallet B, / which needs no setup.",
+    say: "She sends twenty-five shares to Bob, / who needs no setup.",
   },
   {
     step: "Receive",
     detail: "Found from its address alone",
     start: 25.2,
-    say: "Wallet B finds them from its address alone, / question wording included.",
+    say: "Bob finds them from his address alone, / question wording included.",
   },
   {
     step: "Wrap",
-    detail: "An ordinary Token-2022 token",
+    detail: "A Token-2022 token, for markets",
     start: 31.7,
-    say: "Wrapping turns shares into an ordinary token / any wallet can hold.",
+    say: "Optionally, / wrapping turns shares into an ordinary token, / so markets and wallets can trade it.",
+    optional: true,
   },
   {
     step: "Resolve",
     detail: "Only the resolver reports, once",
     start: 38.2,
-    say: "The resolver reports both results. / Only it can, / and it's final.",
+    say: "The resolver reports both results. / No one else can, / and once reported, it can't be changed.",
   },
   {
     step: "Unwrap",
     detail: "Back to shares, to redeem",
     start: 49.2,
-    say: "To redeem, / A unwraps the token back into shares.",
+    say: "Alice can unwrap the tokens she wrapped earlier / back into shares, / to be able to redeem.",
+    optional: true,
   },
   {
     step: "Redeem all",
     detail: "75 winning shares pay 75",
     start: 56.8,
-    say: "Redeem all turns 75 winning shares / into 75 tokens.",
+    say: "Redeem all turns seventy-five winning shares / into seventy-five collateral tokens.",
   },
 ];
 
@@ -142,59 +176,203 @@ const demoStepAt = (time: number) =>
 
 const DEMO_VIDEO = `${import.meta.env.BASE_URL}pitch/demo.mp4`;
 
-// The step cards follow the video while it plays, and clicking one jumps to it.
+function OptionalTag() {
+  return (
+    <span className="rounded-full border border-dashed border-muted px-2 py-px text-xs font-medium text-muted">
+      optional
+    </span>
+  );
+}
+
+// Just before a step's end, so a paused video still shows that step, not the next title card.
+const STEP_EDGE = 0.08;
+
+// The step cards follow the video while it plays, and clicking one plays it. By default the
+// video pauses after each step, and the next-slide keys play the following step until the
+// last one has played.
 function Demo() {
   const video = useRef<HTMLVideoElement>(null);
   const [missing, setMissing] = useState(false);
   const [time, setTime] = useState(0);
+  // The video fills the window when the browser refuses real full screen.
+  const [expanded, setExpanded] = useState(false);
+  const [stepwise, setStepwise] = useState(true);
   const current = demoStepAt(time);
 
-  // The notes window follows the video, even full screen, and can start or pause it.
+  const finished = () => {
+    const player = video.current;
+    return !player || player.ended || player.currentTime >= player.duration - 0.2;
+  };
+  const playStep = (index: number) => {
+    const player = video.current;
+    const step = DEMO_STEPS[index];
+    if (!player || !step) return;
+    player.currentTime = step.start;
+    player.play().catch(() => {});
+  };
+  // The next step, from a pause at the end of the last one. False once the video is over.
+  const advance = () => {
+    const player = video.current;
+    if (!player || finished()) return false;
+    if (player.paused) player.play().catch(() => {});
+    else player.pause();
+    return true;
+  };
+
+  // Pauses when playback crosses the end of a step. Starting from a pause at a step's end, or
+  // seeking past one, is not a crossing. Checked on every frame, and on the video's own time
+  // updates, which keep coming when the window is in the background and frames stop.
+  useEffect(() => {
+    const player = video.current;
+    if (!player) return;
+    let frame = 0;
+    let last = player.currentTime;
+    // Where playback last started or jumped to. A video paused at a step's end reports its
+    // time rounded, a hair before that end, so playing on from there is not a crossing.
+    let origin = last;
+    const ends = DEMO_STEPS.slice(1).map(({ start }) => start - STEP_EDGE);
+    const check = () => {
+      const now = player.currentTime;
+      const crossed = ends.find((end) => last < end && end <= now && origin < end - 0.02);
+      if (stepwise && !player.paused && crossed !== undefined) {
+        player.pause();
+        player.currentTime = crossed;
+        last = origin = crossed;
+      } else {
+        last = now;
+      }
+    };
+    const onFrame = () => {
+      check();
+      frame = requestAnimationFrame(onFrame);
+    };
+    const onSeek = () => {
+      last = origin = player.currentTime;
+    };
+    player.addEventListener("seeking", onSeek);
+    player.addEventListener("timeupdate", check);
+    frame = requestAnimationFrame(onFrame);
+    return () => {
+      player.removeEventListener("seeking", onSeek);
+      player.removeEventListener("timeupdate", check);
+      cancelAnimationFrame(frame);
+    };
+  }, [missing, stepwise]);
+
+  const toggleFullScreen = () => {
+    const player = video.current;
+    if (!player) return;
+    if (document.fullscreenElement) return void document.exitFullscreen();
+    if (expanded) return setExpanded(false);
+    player.requestFullscreen().catch(() => setExpanded(true));
+  };
+
+  // Listeners are set up once and read the current state from here.
+  const latest = useRef({ expanded, stepwise, advance, playStep, toggleFullScreen, finished });
+  latest.current = { expanded, stepwise, advance, playStep, toggleFullScreen, finished };
+
+  // The notes window asks through the window that opened it, handing over its click so the
+  // browser allows full screen. Escape leaves the filled window before it would leave the deck,
+  // and the next-slide keys play the next step while there is one.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent<{ video?: unknown }>) => {
+      if (event.origin === window.location.origin && event.data.video === "fullscreen") {
+        latest.current.toggleFullScreen();
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const { expanded, stepwise, advance } = latest.current;
+      if (event.key === "Escape" && expanded) {
+        event.stopImmediatePropagation();
+        setExpanded(false);
+      } else if (stepwise && ["ArrowRight", "PageDown", " "].includes(event.key) && advance()) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+    window.addEventListener("message", onMessage);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, []);
+
+  // The notes window follows the video, even full screen, and can play, pause or jump in it.
   useEffect(() => {
     const channel = new BroadcastChannel(CHANNEL);
-    channel.onmessage = (event: MessageEvent<{ video?: unknown }>) => {
-      const player = video.current;
-      if (!player) return;
-      if (event.data.video === "status") report();
-      if (event.data.video !== "toggle") return;
-      if (player.paused) void player.play();
-      else player.pause();
-    };
     const player = video.current;
     const report = () => {
       if (!player) return;
+      const { expanded, stepwise, finished } = latest.current;
       channel.postMessage({
-        video: { time: player.currentTime, duration: player.duration, playing: !player.paused },
+        video: {
+          time: player.currentTime,
+          duration: player.duration,
+          playing: !player.paused,
+          full: expanded || document.fullscreenElement === player,
+          stepwise,
+          finished: finished(),
+        },
       });
     };
-    const events = ["timeupdate", "play", "pause", "seeked", "loadedmetadata"] as const;
+    channel.onmessage = (event: MessageEvent<{ video?: unknown; step?: unknown }>) => {
+      if (!player) return;
+      if (typeof event.data.step === "number") latest.current.playStep(event.data.step);
+      switch (event.data.video) {
+        case "status":
+        case "changed":
+          return report();
+        case "fullscreen":
+          return latest.current.toggleFullScreen();
+        case "advance":
+          return void latest.current.advance();
+        case "stepwise":
+          return setStepwise((on) => !on);
+        case "toggle":
+          if (player.paused) player.play().catch(() => {});
+          else player.pause();
+      }
+    };
+    const events = ["timeupdate", "play", "pause", "seeked", "loadedmetadata", "ended"] as const;
     for (const name of events) player?.addEventListener(name, report);
+    document.addEventListener("fullscreenchange", report);
+    report();
     return () => {
       for (const name of events) player?.removeEventListener(name, report);
+      document.removeEventListener("fullscreenchange", report);
       channel.close();
     };
   }, [missing]);
+
+  // A change of mode or size is not a video event, so it is reported on its own.
+  useEffect(() => {
+    const channel = new BroadcastChannel(CHANNEL);
+    channel.postMessage({ video: "changed" });
+    channel.close();
+  }, [expanded, stepwise]);
+
   return (
     <div className="grid grid-cols-[19rem_1fr] items-center gap-8">
       <ol className="flex flex-col gap-1.5">
-        {DEMO_STEPS.map(({ step, detail, start }, index) => (
+        {DEMO_STEPS.map(({ step, detail, optional }, index) => (
           <li key={step}>
             <button
               type="button"
-              onClick={() => {
-                if (!video.current) return;
-                video.current.currentTime = start;
-                void video.current.play();
-              }}
+              onClick={() => playStep(index)}
               className={`flex w-full items-center gap-3 rounded-xl border px-4 py-1.5 text-left transition-colors duration-300 ${
-                index === current ? "border-accent bg-accent-soft" : "border-line bg-panel"
-              }`}
+                optional ? "border-dashed" : ""
+              } ${index === current ? "border-accent bg-accent-soft" : "border-line bg-panel"}`}
             >
               <span className="grid size-7 shrink-0 place-items-center rounded-full bg-accent font-mono text-sm font-semibold text-panel">
                 {index + 1}
               </span>
               <span className="leading-tight">
-                <span className="block text-lg font-semibold">{step}</span>
+                <span className="flex items-center gap-2 text-lg font-semibold">
+                  {step}
+                  {optional && <OptionalTag />}
+                </span>
                 <span className="text-sm text-muted">{detail}</span>
               </span>
             </button>
@@ -214,7 +392,11 @@ function Demo() {
             preload="auto"
             onError={() => setMissing(true)}
             onTimeUpdate={(event) => setTime(event.currentTarget.currentTime)}
-            className="aspect-video w-full rounded-2xl border border-line bg-panel"
+            className={
+              expanded
+                ? "fixed inset-0 z-50 h-full w-full bg-black object-contain"
+                : "aspect-video w-full rounded-2xl border border-line bg-panel"
+            }
           />
         )}
         <a
@@ -317,17 +499,20 @@ const SLIDES: readonly Slide[] = [
   {
     title: "Amp",
     notes:
-      "Most prediction markets let you buy “the Fed cuts” / or “the SOL price is above two hundred dollars.” // But there is no single asset for “the Fed cuts and the SOL price is above two hundred.” // Amp creates that joint claim on Solana, / from one deposit. // Let me start with the problem.",
+      "Hi, I'm Anthony, / and with Lukas / we built Amp, / short for Ampersand Token. // It turns “A and B” into one asset on Solana, / from one deposit.",
     body: (
       <div className="flex h-full flex-col justify-center">
         <div className="flex items-center gap-4">
           <span className="grid size-14 place-items-center rounded-xl bg-accent text-4xl font-bold text-panel">
             &amp;
           </span>
-          <span className="text-3xl font-semibold">Amp</span>
+          <div className="flex flex-col">
+            <span className="text-3xl leading-none font-semibold">Amp</span>
+            <span className="mt-1.5 text-lg leading-none text-muted">Ampersand Token</span>
+          </div>
         </div>
         <h1 className="mt-10 text-7xl leading-tight font-semibold tracking-tight">
-          One asset for <span className="text-accent">“A and B”</span>
+          One asset for <span className="text-accent">“A &amp; B”</span>
         </h1>
         <p className="mt-6 text-3xl text-muted">Combinatorial conditional tokens on Solana</p>
       </div>
@@ -336,7 +521,7 @@ const SLIDES: readonly Slide[] = [
   {
     title: "Two markets cannot tell you how two events are linked",
     notes:
-      "Today, each market prices one event: / here, 50% for a Fed cut, / and 40% for the SOL price at two hundred dollars or more. // But no market prices both happening together. // The closest you can get is two separate bets. / If both happen, / both pay. / But if only one happens, / one of them still pays: / that's two bets, / not a bet on both. // And that combined bet is exactly what people are asking for.",
+      "In today's prediction markets, / each market prices one event: / fifty percent for a Fed cut, / forty percent for the SOL price at two hundred or more. // But no market prices both together. // Two separate bets are not the same thing: / if only one happens, / one of them still pays. // And that combined bet is exactly what people are asking for.",
     body: (
       <div className="flex flex-col gap-8">
         <div className="grid grid-cols-2 gap-6">
@@ -370,7 +555,7 @@ const SLIDES: readonly Slide[] = [
   {
     title: "Combos are where prediction markets are growing",
     notes:
-      "In September 2025, Kalshi launched combos, / and over a hundred million dollars traded in the first week. / Polymarket followed this June. // But there, a combo is a bet you place on their platform. // We wanted the combination itself to be a token / that anyone can create and hold. // Here's how that works.",
+      "In September twenty twenty-five, Kalshi launched combos, / with over a hundred million dollars traded in the first week. / Polymarket followed this June. // But there, a combo is a bet you place on their platform. // We wanted the combination itself to be a token / that anyone can create and hold. // Here's how that works.",
     body: (
       <div className="flex flex-col gap-8">
         <div className="grid grid-cols-2 gap-6">
@@ -393,7 +578,7 @@ const SLIDES: readonly Slide[] = [
   {
     title: "Deposit once. Hold every combination.",
     notes:
-      "I deposit 100 tokens of collateral / and split it by question and result: / the Fed, / then the SOL price. // That gives four positions, one per combination. / The winning one pays, / and together they are always worth the scenario's collateral. // Each is an asset I can hold, send, or wrap as an ordinary token. // So far every result is a clean yes or no. / It doesn't have to be.",
+      "I deposit a hundred tokens of collateral / and split it by question and result: / the Fed, / then the SOL price. // That gives four positions, one per combination. / The winning one pays, / and together they are always worth the scenario's collateral. // Each is an asset I can hold, send, or wrap as an ordinary token. // So far every result is a clean yes or no. / It doesn't have to be.",
     body: (
       <div className="flex flex-col items-center gap-3 text-xl">
         <div className="rounded-xl border border-line bg-panel px-8 py-3 text-center">
@@ -423,7 +608,7 @@ const SLIDES: readonly Slide[] = [
     title: "Beyond betting: outage insurance with a curved payout",
     compact: true,
     notes:
-      "The resolver can also report a share, / and that takes us beyond betting. // An RPC provider posts a 10,000 USDC bond against downtime. / It splits twice on one question, / what proportion of the month the RPC service was down, / and sells “down twice” to its customers as insurance. // That pays the square of the downtime: / a quarter down pays 625, / half down pays 2,500, / a total outage pays everything. // Short outages cost almost nothing; / long ones cost a lot. // So who does what in all this?",
+      "The resolver can also report a share, / and that takes us beyond betting. // Take an RPC provider / that insures its customers against downtime. // It locks ten thousand USDC, / and at the end of the month / the resolver reports what proportion of the month the service was down. // [Point at the curve.] / The payout grows with the outage: / a short outage pays very little, / a long one pays a lot, / a total outage pays everything. // We get that curve by using the same question twice. // Let me show you the whole flow with a recording we did on devnet.",
     body: (
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,6fr)] items-center gap-8">
@@ -481,9 +666,115 @@ const SLIDES: readonly Slide[] = [
     ),
   },
   {
-    title: "Who does what",
+    title: "Demo",
+    compact: true,
+    demo: true,
     notes:
-      "There are three roles. // The creator publishes the scenario, deposits, / keeps the piece it believes in / and sells the rest. // Holders receive or buy those pieces, / then redeem or sell them. // The resolver prepares each question / and reports its result. // And the collateral sits in the program's vault, / with no admin. // Let me show you the whole flow.",
+      "Quick warning: / it has been edited and sped up, / so if you get motion sickness, / now is a good time to look away. // [Press → to play each step; → after the last one moves on.]",
+    after: "So that's the full lifecycle. // How does it compare with what exists?",
+    body: <Demo />,
+  },
+  {
+    title: "How it compares",
+    notes:
+      "Separate markets can't do “A and B”. / Platform combos can, / but only for what the platform lists. // With Amp, anyone creates any combination, / results can be shared, / and each position is a token any wallet can hold. // The idea comes from Gnosis conditional tokens on Ethereum. / We bring it to Solana. // So where does it stand?",
+    body: (
+      <table className="w-full text-left text-2xl">
+        <thead className="text-muted">
+          <tr className="border-b border-line">
+            <th className="py-2 pr-4 font-medium" />
+            <th className="py-2 pr-4 font-medium">Separate markets</th>
+            <th className="py-2 pr-4 font-medium">Platform combos</th>
+            <th className="py-2 font-medium text-accent">Ampersand Token</th>
+          </tr>
+        </thead>
+        <tbody>
+          {COMPARISON.map(([what, separate, platform, combined]) => (
+            <tr key={what} className="border-b border-line last:border-0">
+              <td className="py-3 pr-4 text-xl text-muted">{what}</td>
+              <td className="py-3 pr-4">
+                <ComparisonCell value={separate} />
+              </td>
+              <td className="py-3 pr-4">
+                <ComparisonCell value={platform} />
+              </td>
+              <td className="py-3 font-medium">
+                <ComparisonCell value={combined} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ),
+  },
+  {
+    title: "Where it stands",
+    notes:
+      "The program is deployed on devnet, / with a TypeScript SDK and our demo app, / tested on devnet. // Next: a market for these tokens, / so anyone can trade “A and B” / as easily as a single bet. // And we're not the only ones who think this matters: / Galaxy Research just published a report on conditional markets. // Thank you.",
+    body: (
+      <div className="flex flex-col gap-8">
+        <div className="grid grid-cols-2 gap-6 text-2xl">
+          <Card>
+            <div className="text-xl text-muted">Today</div>
+            <div className="mt-3 font-medium">Deployed on {CLUSTER.name}</div>
+            <div className="mt-1 font-mono text-sm break-all text-muted">
+              {CC_TOKEN_PROGRAM_ADDRESS}
+            </div>
+            <p className="mt-3 text-xl text-muted">Program, TypeScript SDK and demo app.</p>
+          </Card>
+          <Card tone="accent">
+            <div className="text-xl text-muted">Next</div>
+            <div className="mt-3 font-medium">A market that prices these tokens</div>
+          </Card>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-4">
+          <span className="text-5xl font-semibold tracking-tight">Thank you</span>
+          <span className="font-mono text-xl text-muted">
+            cc-token.vercel.app · github.com/neodyma/cc-token
+          </span>
+        </div>
+      </div>
+    ),
+  },
+  // Kept after the close, for questions: the talk itself ends on the slide before.
+  {
+    title: "Backup: where Amp fits",
+    notes:
+      "Galaxy Research groups these as conditional markets. // Decision markets let a market decide, / like MetaDAO on Solana. / Impact markets price how an event moves an asset. // Each splits on one event. / Amp combines any questions / into one token anyone can create and hold. // And the tokens carry impact for free: / compare “cut and SOL at two hundred or more” / with “no cut and SOL at two hundred or more”.",
+    body: (
+      <div className="flex flex-col gap-6">
+        <div className="grid grid-cols-3 gap-6 text-2xl">
+          <Card>
+            <div className="text-xl text-muted">Decision markets</div>
+            <div className="mt-3 font-medium">A market decides whether a proposal passes</div>
+            <p className="mt-3 text-xl text-muted">MetaDAO (Solana) · Umia</p>
+          </Card>
+          <Card>
+            <div className="text-xl text-muted">Impact markets</div>
+            <div className="mt-3 font-medium">How an event moves an asset's price</div>
+            <p className="mt-3 text-xl text-muted">Proof · If Market · Lightcone</p>
+          </Card>
+          <Card tone="accent">
+            <div className="text-xl text-muted">The token layer</div>
+            <div className="mt-3 font-medium">Any combination of questions, as one token</div>
+            <p className="mt-3 text-xl text-muted">Amp on Solana · Branchpoint (EVM pilot)</p>
+          </Card>
+        </div>
+        <p className="text-2xl">
+          Impact for free: “cut &amp; SOL ≥ $200” next to “no cut &amp; SOL ≥ $200” shows how the
+          Fed moves SOL.
+        </p>
+        <p className="text-base text-muted">
+          Grouping from Galaxy Research, “Conditional Markets Are Beginning to Blossom”, 15 October
+          2026.
+        </p>
+      </div>
+    ),
+  },
+  {
+    title: "Backup: who does what",
+    notes:
+      "There are three roles. // The creator publishes the scenario, deposits, / keeps the piece it believes in / and sells the rest. // Holders receive or buy those pieces, / then redeem or sell them. // The resolver prepares each question / and reports its result. // And the collateral sits in the program's vault, / with no admin.",
     body: (
       <div className="flex flex-col gap-3">
         <div className="grid grid-cols-[10rem_repeat(3,minmax(0,1fr))] gap-3 text-2xl">
@@ -521,75 +812,9 @@ const SLIDES: readonly Slide[] = [
     ),
   },
   {
-    title: "Demo",
-    compact: true,
-    demo: true,
-    notes:
-      "This was recorded on a local validator, / with the same program that runs on devnet. // [Play the video: the step below follows it.]",
-    after: "So that's the full lifecycle. // How does it compare with what exists?",
-    body: <Demo />,
-  },
-  {
-    title: "How it compares",
-    notes:
-      "Separate markets can't do “A and B”. // Platform combos can, / but only for what the platform lists, / and only on that platform. // With Amp, anyone creates any combination from one deposit, / results can be shared, / and the position is a token any wallet can hold. // The idea comes from Gnosis conditional tokens on Ethereum. / We bring it to Solana. // So where does it stand?",
-    body: (
-      <table className="w-full text-left text-2xl">
-        <thead className="text-muted">
-          <tr className="border-b border-line">
-            <th className="py-2 pr-4 font-medium" />
-            <th className="py-2 pr-4 font-medium">Separate markets</th>
-            <th className="py-2 pr-4 font-medium">Platform combos</th>
-            <th className="py-2 font-medium text-accent">Amp</th>
-          </tr>
-        </thead>
-        <tbody>
-          {COMPARISON.map(([what, separate, platform, combined]) => (
-            <tr key={what} className="border-b border-line last:border-0">
-              <td className="py-4 pr-4 text-xl text-muted">{what}</td>
-              <td className="py-4 pr-4">{separate}</td>
-              <td className="py-4 pr-4">{platform}</td>
-              <td className="py-4 font-medium">{combined}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    ),
-  },
-  {
-    title: "Where it stands",
-    notes:
-      "The program is deployed on devnet, / with a TypeScript SDK and this app, / tested on a local validator and on devnet. // The next step is a market that prices these tokens. // Thank you.",
-    body: (
-      <div className="flex flex-col gap-8">
-        <div className="grid grid-cols-2 gap-6 text-2xl">
-          <Card>
-            <div className="text-xl text-muted">Today</div>
-            <div className="mt-3 font-medium">Deployed on {CLUSTER.name}</div>
-            <div className="mt-1 font-mono text-sm break-all text-muted">
-              {CC_TOKEN_PROGRAM_ADDRESS}
-            </div>
-            <p className="mt-3 text-xl text-muted">Program, TypeScript SDK and this app.</p>
-          </Card>
-          <Card tone="accent">
-            <div className="text-xl text-muted">Next</div>
-            <div className="mt-3 font-medium">A market that prices these tokens</div>
-          </Card>
-        </div>
-        <div className="flex flex-wrap items-baseline justify-between gap-4">
-          <span className="text-5xl font-semibold tracking-tight">Thank you</span>
-          <span className="font-mono text-xl text-muted">
-            cc-token.vercel.app · github.com/neodyma/cc-token
-          </span>
-        </div>
-      </div>
-    ),
-  },
-  // Kept after the close, for questions: the talk itself ends on the slide before.
-  {
     title: "Backup: a payout that follows a price",
     notes:
-      "The same weights give a payout that follows a price. // One question: / where does the SOL price settle between 100 and 300 dollars, / with two results, / high and low. // If it settles at 250, / three quarters of the way up, / the resolver reports 75 for high / and 25 for low. // A hundred shares of high pay 75, / a hundred of low pay 25: / still exactly the 100 deposited. // And it combines like any question: / “the Fed cuts, and high” / pays 75 only if the Fed cut.",
+      "The same weights give a payout that follows a price. // One question: / where does the SOL price settle between a hundred and three hundred dollars, / with two results, / high and low. // If it settles at two hundred fifty, / three quarters of the way up, / the resolver reports seventy-five for high / and twenty-five for low. // A hundred shares of high pay seventy-five, / a hundred of low pay twenty-five: / still exactly the hundred deposited. // And it combines like any question: / “the Fed cuts, and high” / pays seventy-five only if the Fed cut.",
     body: (
       <div className="flex flex-col gap-8">
         <Card>
@@ -625,7 +850,7 @@ const SLIDES: readonly Slide[] = [
           </Card>
         </div>
         <p className="text-2xl text-muted">
-          It combines like any other question: “cut & high” pays 75 only if the Fed cut.
+          It combines like any other question: “cut & high” pays seventy-five only if the Fed cut.
         </p>
       </div>
     ),
@@ -634,7 +859,7 @@ const SLIDES: readonly Slide[] = [
     title: "Backup: the outage bond, piece by piece",
     compact: true,
     notes:
-      "Here is where every unit of the bond goes. // The provider splits the 10,000 on the downtime question / into “down” and “up”, / then splits “down” again on the same question. // That leaves three positions. / The customer holds “down and down”; / the provider keeps “down and up” and “up”. // Whatever the downtime, / the three always add up to the 10,000. // And the order doesn't matter: / “down and up” and “up and down” / are the same position, / with the same ID.",
+      "Here is where every unit of the bond goes. // The provider splits the ten thousand on the downtime question / into “down” and “up”, / then splits “down” again on the same question. // That leaves three positions. / The customer holds “down and down”; / the provider keeps “down and up” and “up”. // Whatever the downtime, / the three always add up to the ten thousand. // And the order doesn't matter: / “down and up” and “up and down” / are the same position, / with the same ID.",
     body: (
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center gap-3 text-xl">
@@ -913,7 +1138,15 @@ function speakingTime(text: string): number {
   return words / WORDS_PER_SECOND + breaths * 0.4 + pauses;
 }
 
-type VideoState = Readonly<{ time: number; duration: number; playing: boolean }>;
+type VideoState = Readonly<{
+  time: number;
+  duration: number;
+  playing: boolean;
+  full: boolean;
+  // Pauses after each step; the next-slide keys then play the next one.
+  stepwise: boolean;
+  finished: boolean;
+}>;
 
 // The demo video as the slides window reports it: where it is, and what to say there.
 function DemoNotes() {
@@ -930,6 +1163,41 @@ function DemoNotes() {
   }, []);
   const current = video ? demoStepAt(video.time) : -1;
 
+  // Through the opener, the click carries over and the browser allows real full screen.
+  const fullScreen = useCallback(() => {
+    const message = { video: "fullscreen" };
+    if (window.opener) {
+      (window.opener as Window).postMessage(message, {
+        targetOrigin: window.location.origin,
+        delegate: "fullscreen",
+      } as WindowPostMessageOptions);
+    } else {
+      channel.current?.postMessage(message);
+    }
+  }, []);
+  // While steps remain, the next-slide keys play the next step instead of leaving the slide.
+  const latest = useRef(video);
+  latest.current = video;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const state = latest.current;
+      if (event.key === "f" || event.key === "F") {
+        fullScreen();
+      } else if (
+        ["ArrowRight", "PageDown", " "].includes(event.key) &&
+        state?.stepwise &&
+        !state.finished
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        channel.current?.postMessage({ video: "advance" });
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [fullScreen]);
+
   return (
     <div className="mt-5 flex flex-col gap-3">
       <div className="flex items-center gap-4">
@@ -938,16 +1206,52 @@ function DemoNotes() {
           onClick={() => channel.current?.postMessage({ video: "toggle" })}
           className="rounded-md border border-accent bg-accent px-4 py-2 text-base font-medium text-panel"
         >
-          {video?.playing ? "Pause video" : "Play video"}
+          {video?.playing
+            ? "Pause video"
+            : video?.stepwise && !video.finished && video.time > 0
+              ? "Play next step · →"
+              : "Play video · →"}
+        </button>
+        <button
+          type="button"
+          onClick={fullScreen}
+          className="rounded-md border border-line px-4 py-2 text-base hover:bg-panel"
+        >
+          {video?.full ? "Exit full screen" : "Full screen"} <span className="text-muted">· F</span>
         </button>
         <span className="font-mono text-lg text-muted">
           {video ? `${clock(video.time)} / ${clock(video.duration || 0)}` : "video not loaded yet"}
         </span>
+        <label className="ml-auto flex items-center gap-2 text-sm text-muted">
+          <input
+            type="checkbox"
+            checked={video?.stepwise ?? true}
+            onChange={() => channel.current?.postMessage({ video: "stepwise" })}
+          />
+          Pause after each step
+        </label>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {DEMO_STEPS.map(({ step, optional }, index) => (
+          <button
+            key={step}
+            type="button"
+            onClick={() => channel.current?.postMessage({ step: index })}
+            className={`rounded-md border px-2.5 py-1 text-sm ${optional ? "border-dashed italic" : ""} ${
+              index === current
+                ? "border-accent bg-accent font-semibold text-panel"
+                : "border-line text-muted hover:text-ink"
+            }`}
+          >
+            {index + 1} {step}
+          </button>
+        ))}
       </div>
       {current >= 0 && (
         <div className="rounded-lg border border-accent bg-accent-soft px-5 py-4">
-          <div className="text-sm text-muted">
+          <div className="flex items-center gap-2 text-sm text-muted">
             Step {current + 1} of {DEMO_STEPS.length}
+            {DEMO_STEPS[current]!.optional && <OptionalTag />}
           </div>
           <div className="mt-1 text-3xl leading-snug">
             <span className="font-semibold">{DEMO_STEPS[current]!.step}.</span>{" "}
